@@ -43,6 +43,9 @@ class communicator(object):
         # 기존 핸들러 제거 (중복 방지)
         self.logger.handlers = []
         
+        # propagate 비활성화 - root logger로의 전파 방지
+        self.logger.propagate = False
+        
         # 파일 핸들러
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setLevel(logging.INFO)
@@ -58,6 +61,9 @@ class communicator(object):
         
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
+        
+        # 초기 로그 메시지
+        self.logger.info('Logger initialized successfully')
 
     def Analysis(self, x, f):
 

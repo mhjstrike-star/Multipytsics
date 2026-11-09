@@ -51,7 +51,7 @@ class solving:
         else:
             current_count = 0
         # 로깅 설정
-        log_file = os.path.join(os.path.dirname(opath), 'solving.log')
+        log_file = os.path.join(os.path.dirname(opath),'task', 'amrfunction.log')
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
