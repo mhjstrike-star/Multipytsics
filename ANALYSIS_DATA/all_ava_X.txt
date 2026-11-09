@@ -1,0 +1,49 @@
+rpm	100	
+Ipk	0	
+beta	0	
+cycle	1.5	
+Step_ElecDeg	4	
+N_pole	8	
+N_slot	48	
+Lstk	153	mm
+N_parallel	2	
+N_layer	8	
+St_Dout	200	mm
+Airgap	0.8	mm
+Rt_Dout	132	mm
+Rt_Din	50	mm
+MagT_Area_ratio	0.334	
+AirbT_pckt_T	1.629	mm
+MagR_A	8.103	deg
+AirbR_pcktAirg_T	9.571	mm
+Coil_Height	19.648	mm
+Coil_Width	4.781	mm
+AirbT_brdg_T	0.7	mm
+AirbT_brdg_A1	0	deg
+AirbT_brdg_A2	4.2	deg
+AirbT_pckt_Offset	0.5	mm
+AirbR_brdgAirg_A2	2.4	deg
+AirbR_brdgMid_T	1	mm
+AirbR_pcktMid_Ceil	2.5	mm
+MagTotal_Area	207.2	mm2
+MagT_T	5	mm
+MagR_T	5	mm
+Sl_open	1.4	mm
+Sl_shoe_H1	0.5	mm
+Sl_shoe_A	45	deg
+Coil_Sl_gap_angular	0.47	mm
+Coil_Sl_gap_radial	0.475	mm
+AirbT_Round1	0.5	mm
+AirbT_Round2	0.5	mm
+AirbT_Round3	0.5	mm
+AirbT_Round4	0.5	mm
+AirbR_Round1	0.5	mm
+AirbR_Round2	0.5	mm
+AirbR_Round3	0.5	mm
+AirbR_Round4	0.5	mm
+AirbR_Round5	0.5	mm
+AirbR_Round6	0.5	mm
+AirbR_Round7	0.5	mm
+AirbR_Round8	0.5	mm
+Mag_Chamfer	0.5	mm
+skew	0	deg

@@ -1,0 +1,17 @@
+efficiency of mg				@dp_mgidx.txt
+efficiency of inv				@dp_mgidx.txt
+efficiency of mg+inv			@dp_mgidx.txt
+lossE of copper				@dp_mgidx.txt
+lossE of iron				@dp_mgidx.txt
+tq_max					@resp_tq_marg
+tq_margin				tq_max/tq_lim @resp_tq_marg
+pwr_margin				pwr_max/pwr_lim @resp_pwr_marg
+tq_ripple 6order				fft result @resp_tq_rp
+tq_ripple 12order				fft result @resp_tq_rp
+Permeance				@Ipk=imax*0.8 & beta=90 & skew=0
+Fr_rp					fft result @resp_Fr_rp
+Maximum Principal Stress				Max. Principle Stress @resp_rS
+copper lossPwr at tq_max			@resp_tq_max_cpl
+iron lossPwr at tq_max			@resp_tq_max_irl
+copper lossPwr at user defined (rpm,tq)	@resp_where_cpl
+iron lossPwr at user defined (rpm,tq)		@resp_where_irl

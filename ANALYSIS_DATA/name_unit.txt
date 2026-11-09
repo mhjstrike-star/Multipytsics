@@ -1,0 +1,6 @@
+MagT_Area_ratio	
+AirbT_pckt_T	mm
+MagR_A	deg	
+AirbR_pcktAirg_T	mm	
+Coil_Height	mm
+Coil_Width	mm
