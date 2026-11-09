@@ -1,4 +1,5 @@
 import os
+import math
 import traceback
 import multiprocessing as mp
 import functions.amr_functions as amr  # AMR 관련 함수 모듈 임포트
@@ -387,122 +388,118 @@ class PageAMR(QWidget):
         self.log_display.appendPlainText(message)
 
     def on_execute(self):
-        """실행 버튼 클릭 시 호출"""
-        if not self.can_start():
-            return
-        
-        amr.AMR_setting(self.main_window.WDIR)   # Task 폴더 초기화 작업 진행 
-        if self.log_timer.isActive(): # 이전 타이머 멈추기 (파일 handle이 해제되도록)
-            self.log_timer.stop()
-        log_file_path = os.path.join(self.main_window.WDIR, 'amrfunction.log')
-        self.log_file_path = log_file_path
-        self.log_position = 0  # 로그 위치 초기화
-        self.log_display.clear()  # 로그 디스플레이 초기화
-        max_exp = self.max_exp_spinbox.value()
-        nx = len(self.main_window.DV)      # 선택된 설계 변수 개수
-        nobj = 1
-        ncon  = len(self.main_window.OV)-1
-        xl = [float(self.table.item(i, 1).text()) for i in range(self.table.rowCount())]  # n x 1 list (하한값)
-        xu = [float(self.table.item(i, 2).text()) for i in range(self.table.rowCount())]  # n x 1 list (상한값)
-        xname = [self.table.item(i, 0).text() for i in range(self.table.rowCount())]  # n x 1 list (설계변수 이름)
-        yname = [self.output_table.item(i, 0).text() for i in range(self.output_table.rowCount())]  # n x 1 list (출력변수 이름)
-        unit= [self.table.item(i, 3).text() for i in range(self.table.rowCount())]  # n x 1 list (설계변수 단위)
-        size_limit = int(max_exp)  # 최대 실험점 개수
-        accuracy_limit =  [ov.get('TARGET_ERROR', 0)*0.01 for ov in self.main_window.OV] 
-        cpath=os.path.join(os.path.dirname(self.main_window.WDIR), 'task/AMR_Result')  # AMR 결과 저장 경로
-        amr_logfile = os.path.join(cpath, 'AMR.LOG')
-        if os.path.exists(amr_logfile):
-            try:
-                os.remove(amr_logfile)
-            except OSError as e:
-                pass
-        
-        try: # 워커 스레드 생성 및 신호 연결
-            worker = AMRWorker(
-                nx=nx, nobj=nobj, ncon=ncon,
-                xl=xl, xu=xu,
-                size_limit=size_limit,
-                accuracy_limit=accuracy_limit,
-                cpath=cpath,
-                opath=self.main_window.WDIR,
-                rpm4fl=self.main_window.rpm4fl,
-                ip=self.main_window.IP_ADDRESS,
-                xname=xname,
-                yname=yname,
-                Unit=unit,
-                what=self.main_window.ANALYSIS_TARGET)
-            self.start_worker(worker)
-        except Exception as e:
-            self.log_display.appendPlainText(f"AMRWorker 실행 중 오류 발생: {str(e)}")
+        self.start_run()
 
     def on_browse_file(self): # 파일 탐색 버튼 클릭 시 호출
         file_path, _ = QFileDialog.getOpenFileName(self, '분석 결과 파일 선택', self.main_window.WDIR, 'CSV Files (*.csv);;All Files (*)')
         if file_path: self.info_path.setText(file_path)
-   
-    def on_execute2(self): # 작업 이어하기 실행 버튼 클릭 시 호출
+
+    def on_execute2(self): # 이어하기 실행 버튼 클릭 시 호출
+        self.start_run(restart=True)
+
+    def start_run(self, restart=False):
         if not self.can_start():
             return
-        
-        info_path = self.info_path.text().strip()  
-        if not os.path.isfile(info_path):
-            self.log_display.appendPlainText("이어하기에 사용할 CSV 파일을 선택해 주세요.")
-            return
-        
-        # 이전 타이머 멈추기 (파일 handle이 해제되도록)
-        if self.log_timer.isActive():
-            self.log_timer.stop()
-        
-        log_file_path = os.path.join(self.main_window.WDIR, 'amrfunction.log')
-        self.log_file_path = log_file_path
-        self.log_position = 0  # 로그 위치 초기화
-        self.log_display.clear()  # 로그 디스플레이 초기화
-        
-        max_exp = self.max_exp_spinbox.value()
-        nx = len(self.main_window.DV)      # 선택된 설계 변수 개수
-        nobj = 1
-        ncon  = len(self.main_window.OV)-1
-        xl = [float(self.table.item(i, 1).text()) for i in range(self.table.rowCount())]  # n x 1 list (하한값)
-        xu = [float(self.table.item(i, 2).text()) for i in range(self.table.rowCount())]  # n x 1 list (상한값)
-        xname = [self.table.item(i, 0).text() for i in range(self.table.rowCount())]  # n x 1 list (설계변수 이름)
-        yname = [self.output_table.item(i, 0).text() for i in range(self.output_table.rowCount())]  # n x 1 list (출력변수 이름)
-        unit= [self.table.item(i, 3).text() for i in range(self.table.rowCount())]  # n x 1 list (설계변수 단위)
-        size_limit = int(max_exp)  # 최대 실험점 개수
-        accuracy_limit =  [ov.get('TARGET_ERROR', 0)*0.01 for ov in self.main_window.OV] 
-        cpath=os.path.join(os.path.dirname(self.main_window.WDIR), 'task/AMR_Result')  # AMR 결과 저장 경로
-        count_file = os.path.join(self.main_window.WDIR, 'runcount.txt')
-        wdir_path = os.path.join(self.main_window.WDIR, 'wdir')
+
+        try:
+            settings = self.run_settings(restart)
+            work_dir = settings['opath']
+            result_dir = settings['cpath']
+            old_files = ['AMR.LOG', 'convergence_info.bin'] if restart else ['AMR.LOG']
+            for filename in old_files:
+                path = os.path.join(result_dir, filename)
+                if os.path.isfile(path):
+                    os.remove(path)
+
+            if restart:
+                self.prepare_restart(work_dir)
+            else:
+                amr.AMR_setting(work_dir)
+
+            self.log_file_path = os.path.join(work_dir, 'amrfunction.log')
+            self.log_position = 0
+            self.log_display.clear()
+            self.start_worker(AMRWorker(**settings))
+        except Exception as error:
+            self.log_display.appendPlainText(f"AMR 실행 오류: {error}")
+
+    def run_settings(self, restart):
+        work_dir = self.main_window.WDIR
+        if not work_dir or not os.path.isdir(os.path.join(work_dir, 'base')):
+            raise ValueError("Main에서 해석 결과 폴더를 지정하고 설계변수를 확정해 주세요.")
+        if not self.table.rowCount() or not self.output_table.rowCount():
+            raise ValueError("설계변수와 출력변수를 각각 하나 이상 확정해 주세요.")
+
+        xname, xl, xu, units = [], [], [], []
+        for row in range(self.table.rowCount()):
+            name = self.cell_text(self.table, row, 0)
+            try:
+                lower = float(self.cell_text(self.table, row, 1))
+                upper = float(self.cell_text(self.table, row, 2))
+            except ValueError:
+                raise ValueError(f"설계변수 {row + 1}행의 하한·상한에 숫자를 입력해 주세요.") from None
+            if not name or not (math.isfinite(lower) and math.isfinite(upper) and lower < upper):
+                raise ValueError(f"설계변수 {row + 1}행의 이름과 범위를 확인해 주세요. 하한은 상한보다 작아야 합니다.")
+            xname.append(name)
+            xl.append(lower)
+            xu.append(upper)
+            units.append(self.cell_text(self.table, row, 3))
+
+        yname, accuracy_limit = [], []
+        for row in range(self.output_table.rowCount()):
+            name = self.cell_text(self.output_table, row, 0)
+            try:
+                error = float(self.cell_text(self.output_table, row, 1))
+            except ValueError:
+                raise ValueError(f"출력변수 {row + 1}행의 목표 오차율에 숫자를 입력해 주세요.") from None
+            if not name or not math.isfinite(error) or error < 0:
+                raise ValueError(f"출력변수 {row + 1}행의 이름과 목표 오차율을 확인해 주세요.")
+            yname.append(name)
+            accuracy_limit.append(error * 0.01)
+
+        ips = self.main_window.IP_ADDRESS
+        if not ips or any(not ip.strip() for ip in ips):
+            raise ValueError("Main에서 사용할 노드의 서버 IP를 입력해 주세요.")
+        try:
+            rpm = float(self.main_window.rpm4fl)
+        except ValueError:
+            raise ValueError("Main의 rpm4fl에 숫자를 입력해 주세요.") from None
+        if not math.isfinite(rpm):
+            raise ValueError("Main의 rpm4fl에 유한한 숫자를 입력해 주세요.")
+
+        info_path = self.info_path.text().strip() if restart else None
+        if restart:
+            if not os.path.isfile(info_path):
+                raise ValueError("이어하기에 사용할 CSV 파일을 선택해 주세요.")
+            amr.load_restart_points(info_path, len(xname) + len(yname))
+
+        if not callable(getattr(amr.run_analysis, 'AutoCal', None)):
+            raise ValueError("고객사 해석 모듈 functions/run_analysis.py에 AutoCal을 연결해 주세요.")
+
+        return dict(
+            nx=len(xname), nobj=1, ncon=len(yname) - 1, xl=xl, xu=xu,
+            size_limit=int(self.max_exp_spinbox.value()), accuracy_limit=accuracy_limit,
+            cpath=os.path.join(work_dir, 'AMR_Result'), opath=work_dir,
+            rpm4fl=rpm, ip=ips, xname=xname, yname=yname, Unit=units,
+            what=self.main_window.ANALYSIS_TARGET, restart=restart, ppath=info_path,
+        )
+
+    @staticmethod
+    def cell_text(table, row, column):
+        item = table.item(row, column)
+        return item.text().strip() if item is not None else ""
+
+    def prepare_restart(self, work_dir):
+        count_file = os.path.join(work_dir, 'runcount.txt')
+        wdir_path = os.path.join(work_dir, 'wdir')
         if os.path.exists(wdir_path):
             folders = [d for d in os.listdir(wdir_path) if os.path.isdir(os.path.join(wdir_path, d)) and d.isdigit()]
-            if folders:
-                max_folder_num = max(int(f) for f in folders)
-            else:
-                max_folder_num = 0
+            max_folder_num = max((int(folder) for folder in folders), default=0)
         else:
             max_folder_num = 0
 
         with open(count_file, 'w') as f:
             f.write(str(max_folder_num))
-        
-        print(f"저장된 분석 파일에서 작업을 이어합니다: {info_path}")
-        print(f"info_path = {info_path}")
-
-        convergence_file = os.path.join(cpath, 'convergence_info.bin')
-        amr_logfile = os.path.join(cpath, 'AMR.LOG')
-        if os.path.exists(convergence_file):
-            try:
-                os.remove(convergence_file)
-            except OSError as e:
-                pass
-        if os.path.exists(amr_logfile):
-            try:
-                os.remove(amr_logfile)
-            except OSError as e:
-                pass
-        try:       
-            worker = AMRWorker(nx=nx, nobj=nobj, ncon=ncon,xl= xl,xu= xu, size_limit=size_limit,accuracy_limit= accuracy_limit,cpath=cpath,opath=self.main_window.WDIR,rpm4fl=self.main_window.rpm4fl, ip=self.main_window.IP_ADDRESS,xname=xname,yname=yname,Unit=unit, what=self.main_window.ANALYSIS_TARGET,restart=True, ppath=info_path)
-            self.start_worker(worker)
-        except Exception as e:
-            self.log_display.appendPlainText(f"AMRWorker 실행 중 오류 발생: {str(e)}")
 
     def update_log(self):
         if not self.log_file_path or not os.path.exists(self.log_file_path):
@@ -533,8 +530,8 @@ class PageAMR(QWidget):
                 lv = item.get('LV', 0)  # 하한값
                 uv = item.get('UV', 0)  # 상한값
                 self.table.setItem(i, 0, QTableWidgetItem(name)) # 0열: 설계변수 (NAME)
-                self.table.setItem(i, 1, QTableWidgetItem(f'{lv:.3f}')) # 1열: 하한값 (LV)
-                self.table.setItem(i, 2, QTableWidgetItem(f'{uv:.3f}')) # 2열: 상한값 (UV)
+                self.table.setItem(i, 1, QTableWidgetItem(str(lv))) # 1열: 하한값 (LV)
+                self.table.setItem(i, 2, QTableWidgetItem(str(uv))) # 2열: 상한값 (UV)
                 self.table.setItem(i, 3, QTableWidgetItem(unit)) # 3열: 단위 (UNIT)
         else:
             self.table.setRowCount(0) # DV가 비어있으면 테이블 초기화

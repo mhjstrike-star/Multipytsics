@@ -105,6 +105,15 @@ class communicator(object):
     def HMC(self):
         print('test')
 
+def load_restart_points(path, column_count):
+    try:
+        points = np.loadtxt(path, delimiter=",", ndmin=2)
+    except (OSError, ValueError) as error:
+        raise ValueError(f"이어하기 CSV를 읽을 수 없습니다. 숫자 데이터와 쉼표 구분을 확인해 주세요. ({error})") from error
+    if not points.size or points.shape[1] != column_count or not np.isfinite(points).all():
+        raise ValueError(f"이어하기 CSV는 설계변수와 출력변수를 합쳐 숫자 열 {column_count}개가 필요합니다.")
+    return points
+
 def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xname,yname,Unit, what,restart=False,ppath=None):
 
     global icnt
@@ -181,7 +190,7 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
     if restart == False: 
         pset             = None       # None이면 기존 데이터 파일 없음
     else: 
-        pset = np.loadtxt(ppath,delimiter = ",")[:,:]     
+        pset = load_restart_points(ppath, nx + nf)     
         
     # 병렬 실행 여부
     is_parallel = True
