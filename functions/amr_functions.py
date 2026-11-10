@@ -90,9 +90,9 @@ class communicator(object):
             
         except Exception as e:
             self.logger.error(f'Analysis 중 오류 발생: {e}', exc_info=True)
-            print(f"Error during Analysis: {e}")
-            return
+            raise
 
+    ### ??????????????????????????????????????????????????
     def Export(self, datainfo, modelinfo):
         '''각 단계의
             1) plot 작성을 위한 데이터(npt, bestype, bestrmse)를 받는다.
@@ -215,15 +215,13 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
                  xname=xname, fname=fname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
                  TestFile=TestFile, ntest=ntest, test2train=test2train                                    # (삭제예정)
                  )
-    if amr.info!=0:
-        print(amr.info)
-        return               
-    
+    if amr.info != 0:
+        raise RuntimeError(f"AMR 초기화 실패 (엔진 상태 코드 {amr.info})")
+
     amr.run(comm=cm)
-   
-    if amr.info!=0:
-        print(amr.info)
-        return
+
+    if amr.info != 0:
+        raise RuntimeError(f"AMR 실행 실패 (엔진 상태 코드 {amr.info})")
     ## AMR 실행 ===========================================#              
 
     return
