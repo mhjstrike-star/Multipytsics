@@ -64,7 +64,7 @@ def generate_screening_design(design_variables, sample_count):
 def save_screening_run_table(result_dir, headers, rows):
     return _save_csv(result_dir / 'Runcount_Total.csv', [headers, *rows])
 
-def save_screening_problem_formulator(result_dir, design_variables, input_variables):
+def save_screening_problem_formulator(result_dir, design_variables, input_variables, output_names):
     initial_values = {variable['NAME'].strip(): variable['Value'] for variable in input_variables}
     rows = [('Design Variables',), ('', 'Name', 'Initial', 'Lower', 'Upper', 'Type'),]
     for variable in design_variables:
@@ -75,7 +75,12 @@ def save_screening_problem_formulator(result_dir, design_variables, input_variab
         if initial is None or not lower <= initial <= upper:
             initial = lower / 2 + upper / 2
         rows.append(('', name, initial, lower, upper, 'Continuous'))
-    rows.extend([('Objectives',), ('', 'Name', 'Initial', 'Obj. Type', 'Obj. Target', 'Obj. Weight'), ('Constraints',), ('', 'Name', 'Initial', 'Cons. Lower', 'Cons. Upper'),])
+    rows.extend([('Objectives',), ('', 'Name', 'Initial', 'Obj. Type', 'Obj. Target', 'Obj. Weight'),])
+    if output_names:
+        rows.append(('', output_names[0], 0, 'Minimum', 'None', 1))
+    rows.extend([('Constraints',), ('', 'Name', 'Initial', 'Cons. Lower', 'Cons. Upper'),])
+    for name in output_names[1:]:
+        rows.append(('', name, 0, 'None', 200))
     return _save_csv(result_dir / 'ProblemFormulator.csv', rows)
 
 def _save_csv(path, rows):

@@ -290,7 +290,7 @@ class PageScreening(QWidget):
         else:
             messages.append(f'저장 완료 {saved_path}')
         try:
-            problem_path = save_screening_problem_formulator(result_dir, self.worker.design_variables, self.main_window.IV_list)
+            problem_path = save_screening_problem_formulator(result_dir, self.worker.design_variables, self.main_window.IV_list, output_names)
         except OSError as error:
             messages.append(f'ProblemFormulator.csv 저장 실패.\n{error}')
         else:
