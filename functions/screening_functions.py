@@ -1,3 +1,4 @@
+import csv
 import os
 import platform
 import asyncio
@@ -6,7 +7,7 @@ import numpy as np
 
 from shutil                         import copytree
 from pathlib                        import Path
-from tempfile                       import TemporaryDirectory
+from tempfile                       import NamedTemporaryFile, TemporaryDirectory
 from AIDPreprocessing               import AIDPrep
 
 def generate_screening_design(design_variables, sample_count):
@@ -60,6 +61,44 @@ def generate_screening_design(design_variables, sample_count):
         'oa_counts': oa_counts,
     }
 
+def save_screening_run_table(result_dir, headers, rows):
+    return _save_csv(result_dir / 'Runcount_Total.csv', [headers, *rows])
+
+def save_screening_problem_formulator(result_dir, design_variables, input_variables, output_names):
+    initial_values = {variable['NAME'].strip(): variable['Value'] for variable in input_variables}
+    rows = [('Design Variables',), ('', 'Name', 'Initial', 'Lower', 'Upper', 'Type'),]
+    for variable in design_variables:
+        name = variable['NAME'].strip()
+        lower = variable['LV']
+        upper = variable['UV']
+        initial = initial_values.get(name)
+        if initial is None or not lower <= initial <= upper:
+            initial = lower / 2 + upper / 2
+        rows.append(('', name, initial, lower, upper, 'Continuous'))
+    rows.extend([('Objectives',), ('', 'Name', 'Initial', 'Obj. Type', 'Obj. Target', 'Obj. Weight'),])
+    if output_names:
+        rows.append(('', output_names[0], 0, 'Minimum', 'None', 1))
+    rows.extend([('Constraints',), ('', 'Name', 'Initial', 'Cons. Lower', 'Cons. Upper'),])
+    for name in output_names[1:]:
+        rows.append(('', name, 0, 'None', 200))
+    return _save_csv(result_dir / 'ProblemFormulator.csv', rows)
+
+def save_screening_options(result_dir):
+    rows = [('Minimal', 'FALSE'), ('Recommend', 'TRUE'), ('User-defined', 20), ('Sampling', -1),]
+    return _save_csv(result_dir / 'SCREEN_OPTION.csv', rows, encoding='utf-8')
+
+def _save_csv(path, rows, *, encoding='utf-8-sig'):
+    # Keep an existing result intact if writing fails or Excel has it open.
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(mode='w', encoding=encoding, newline='', dir=path.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            csv.writer(temporary).writerows(rows)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return path
 
 def main():
     # 입력파라미터 설정 ----------------------------        
