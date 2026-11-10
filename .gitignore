@@ -7,3 +7,7 @@ __pycache__/
 
 # Generated AMR work files and results
 /task/
+
+# Generated AMR example files
+/Example_Code/runs/
+/Example_Code/_numba_cache/
