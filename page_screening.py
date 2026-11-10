@@ -3,16 +3,17 @@ from pathlib import Path
 from PySide6.QtGui                      import QFont
 from PySide6.QtCore                     import Qt, QThread, Signal
 from PySide6.QtWidgets                  import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
-from functions.screening_functions      import generate_screening_design
+from functions.screening_functions      import generate_screening_design, save_screening_run_table
 
 class ScreeningWorker(QThread):
     design_ready = Signal(dict)
     generation_failed = Signal(str)
-    def __init__(self, design_variables, requested_count, sample_count, parent):
+    def __init__(self, design_variables, requested_count, sample_count, result_dir, parent):
         super().__init__(parent)
         self.design_variables = design_variables
         self.requested_count = requested_count
         self.sample_count = sample_count
+        self.result_dir = result_dir
 
     def run(self):
         try: design = generate_screening_design(self.design_variables, self.sample_count)
@@ -236,36 +237,41 @@ class PageScreening(QWidget):
             self.monitor_display.setPlainText(f'실험점 {sample_count:,}개를 생성하는 중입니다.')
         self.execute_button.setEnabled(False)
         self.sample_count.setEnabled(False)
-        self.worker = ScreeningWorker(design_variables, requested_count, sample_count, self)
+        self.worker = ScreeningWorker(design_variables, requested_count, sample_count, result_dir, self)
         self.worker.design_ready.connect(self.show_design)
         self.worker.generation_failed.connect(self.show_generation_error)
         self.worker.finished.connect(self.finish_generation)
         self.worker.start()
 
     def show_design(self, design):
-        if self.worker.design_variables != self.main_window.DV:
-            self.monitor_display.setPlainText('설계변수가 변경되었습니다. 새 조건으로 다시 실행해 주세요.')
+        result_dir = self.worker.result_dir
+        if (
+            self.worker.design_variables != self.main_window.DV
+            or Path(self.main_window.WDIR) != result_dir.parent
+        ):
+            self.monitor_display.setPlainText('설계변수 또는 작업 폴더가 변경되었습니다. 새 조건으로 다시 실행해 주세요.')
             return
 
-        names = design['names']
         output_names = [variable['NAME'] for variable in self.main_window.OV]
-        headers = [*names, *output_names]
-        points = design['points']
+        headers = ['No', *design['names'], *output_names]
+        pending_outputs = [''] * len(output_names)
+        rows = [
+            (index, *map(float, point), *pending_outputs)
+            for index, point in enumerate(design['points'])
+        ]
         self.design_table.setColumnCount(len(headers))
         self.design_table.setHorizontalHeaderLabels(headers)
-        self.design_table.setRowCount(len(points))
-        for row, point in enumerate(points):
-            for column, value in enumerate(point):
-                self.design_table.setItem(row, column, QTableWidgetItem(str(float(value))))
-            for column in range(len(names), len(headers)):
-                self.design_table.setItem(row, column, QTableWidgetItem('—'))
+        self.design_table.setRowCount(len(rows))
+        for row, values in enumerate(rows):
+            for column, value in enumerate(values):
+                self.design_table.setItem(row, column, QTableWidgetItem('—' if value == '' else str(value)))
         self.design_table.resizeColumnsToContents()
         oa_counts = design['oa_counts']
         orthogonality = design['orthogonality']
         method = 'OA' if orthogonality >= 1.0 - 1e-12 else 'Near OA'
         available = ', '.join(map(str, oa_counts)) or '없음'
         requested = self.worker.requested_count
-        actual = len(points)
+        actual = len(rows)
         messages = [
             f'{method} 실험점 {actual}개 생성 완료',
             f'요청 {requested}점 · 생성 {actual}점 · 직교성 {orthogonality:.2%}',
@@ -277,6 +283,12 @@ class PageScreening(QWidget):
         if actual < self.worker.sample_count:
             messages.append(f'ToolBox가 요청보다 적은 {actual:,}점을 반환했습니다. 생성된 실험표를 표시합니다.')
         messages.append(f'가능한 정규 OA 실험점 수 {available}')
+        try:
+            saved_path = save_screening_run_table(result_dir, headers, rows)
+        except OSError as error:
+            messages.append(f'Runcount_Total.csv 저장 실패. 파일이 열려 있는지 확인해 주세요.\n{error}')
+        else:
+            messages.append(f'저장 완료 {saved_path}')
         self.monitor_display.setPlainText('\n'.join(messages))
 
     def show_generation_error(self, message):

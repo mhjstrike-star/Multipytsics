@@ -1,3 +1,4 @@
+import csv
 import os
 import platform
 import asyncio
@@ -6,7 +7,7 @@ import numpy as np
 
 from shutil                         import copytree
 from pathlib                        import Path
-from tempfile                       import TemporaryDirectory
+from tempfile                       import NamedTemporaryFile, TemporaryDirectory
 from AIDPreprocessing               import AIDPrep
 
 def generate_screening_design(design_variables, sample_count):
@@ -59,6 +60,25 @@ def generate_screening_design(design_variables, sample_count):
         'orthogonality': float(orthogonality),
         'oa_counts': oa_counts,
     }
+
+
+def save_screening_run_table(result_dir, headers, rows):
+    path = result_dir / 'Runcount_Total.csv'
+    # Keep an existing result intact if writing fails or Excel has it open.
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(
+            mode='w', encoding='utf-8-sig', newline='', dir=result_dir, delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            writer = csv.writer(temporary)
+            writer.writerow(headers)
+            writer.writerows(rows)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return path
 
 
 def main():
