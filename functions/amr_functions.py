@@ -114,7 +114,7 @@ def load_restart_points(path, column_count):
         raise ValueError(f"이어하기 CSV는 설계변수와 출력변수를 합쳐 숫자 열 {column_count}개가 필요합니다.")
     return points
 
-def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xname,yname,Unit, what,restart=False,ppath=None):
+def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xname,yname,Unit, what,restart=False,ppath=None,*,no_imp_count=None):
 
     global icnt
     icnt=0
@@ -162,7 +162,6 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
     abs_avg_limit    = None       # (사용안함) 목표 average abolute error 수치(코드에 영향주지 않기 위해 음수로 설정해둠,[-1.]*nf)
     rel_avg_limit    = None       # (사용안함) 목표 average relative error 수치(코드에 영향주지 않기 위해 음수로 설정해둠,[-1.]*nf)
     #size_limit       = None       # 최대 샘플 허용수(Default: nx*500)
-    no_imp_count     = None       # 연속적으로 no_imp_count 회 모델이 개선되지 않으면 강제 종료(Default: 10, 사용하지 않을 경우: -1)
     itrmop           = 2          # 연속적으로 해당횟수만큼 수렴조건 만족시 종료(Default: 1)
     
     # Outlier & Scaling Option 관련 파라미터

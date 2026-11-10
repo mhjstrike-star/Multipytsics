@@ -9,7 +9,7 @@ from PySide6.QtCore                 import Qt, QTimer, QThread, Signal
 from PySide6.QtWidgets              import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QDoubleSpinBox, QPushButton, QAbstractSpinBox, QPlainTextEdit, QSplitter, QLineEdit, QFileDialog, QScrollArea
 
 class AMRWorker(mp.Process):
-    def __init__(self, nx, nobj, ncon, xl, xu, size_limit, accuracy_limit, cpath, opath, rpm4fl, ip, xname, yname, Unit, what,restart=False, ppath=None):
+    def __init__(self, nx, nobj, ncon, xl, xu, size_limit, accuracy_limit, cpath, opath, rpm4fl, ip, xname, yname, Unit, what,restart=False, ppath=None, *, no_imp_count=None):
         super().__init__()
         self.nx = nx
         self.nobj = nobj
@@ -28,6 +28,7 @@ class AMRWorker(mp.Process):
         self.what = what
         self.restart = restart
         self.ppath = ppath
+        self.no_imp_count = no_imp_count
         self._task = None
     
     def run(self):
@@ -46,7 +47,8 @@ class AMRWorker(mp.Process):
                 Unit=self.Unit,
                 what=self.what,
                 restart=self.restart,
-                ppath=self.ppath
+                ppath=self.ppath,
+                no_imp_count=self.no_imp_count,
             )
 
         except Exception:
@@ -213,13 +215,14 @@ class PageAMR(QWidget):
         params_layout.addWidget(max_exp_label)
         params_layout.addWidget(self.max_exp_spinbox)
         
-        # 수렴 종료 조건
-        convergence_label = QLabel('수렴 종료:')
+        # 모델 개선 정체 조건
+        convergence_label = QLabel('개선 정체 횟수:')
         convergence_label.setMinimumWidth(70)
         self.convergence_spinbox = QDoubleSpinBox()
         self.convergence_spinbox.setMinimum(1)
         self.convergence_spinbox.setMaximum(1000)
         self.convergence_spinbox.setValue(10)
+        self.convergence_spinbox.setToolTip("모델이 이 횟수만큼 연속으로 개선되지 않으면 종료합니다.")
         self.convergence_spinbox.setDecimals(0)
         self.convergence_spinbox.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.convergence_spinbox.setMinimumHeight(30)
@@ -482,6 +485,7 @@ class PageAMR(QWidget):
             cpath=os.path.join(work_dir, 'AMR_Result'), opath=work_dir,
             rpm4fl=rpm, ip=ips, xname=xname, yname=yname, Unit=units,
             what=self.main_window.ANALYSIS_TARGET, restart=restart, ppath=info_path,
+            no_imp_count=int(self.convergence_spinbox.value()),
         )
 
     @staticmethod
@@ -491,15 +495,20 @@ class PageAMR(QWidget):
 
     def prepare_restart(self, work_dir):
         count_file = os.path.join(work_dir, 'runcount.txt')
-        wdir_path = os.path.join(work_dir, 'wdir')
-        if os.path.exists(wdir_path):
-            folders = [d for d in os.listdir(wdir_path) if os.path.isdir(os.path.join(wdir_path, d)) and d.isdigit()]
-            max_folder_num = max((int(folder) for folder in folders), default=0)
-        else:
-            max_folder_num = 0
+        next_number = 0
+        if os.path.isfile(count_file):
+            with open(count_file, encoding='utf-8') as counter:
+                next_number = max(0, int(counter.read().strip() or '0'))
 
-        with open(count_file, 'w') as f:
-            f.write(str(max_folder_num))
+        # A stopped run may have created folders before updating the counter.
+        with os.scandir(work_dir) as entries:
+            for entry in entries:
+                number = entry.name.removesuffix('__result')
+                if number.isdecimal() and entry.is_dir():
+                    next_number = max(next_number, int(number) + 1)
+
+        with open(count_file, 'w', encoding='utf-8') as counter:
+            counter.write(str(next_number))
 
     def update_log(self):
         if not self.log_file_path or not os.path.exists(self.log_file_path):
