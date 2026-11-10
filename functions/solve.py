@@ -161,7 +161,7 @@ class solving:
                     elif 'step4 is finished' in content and flag == 'Mechanical': # 'step4 is finished' 확인 (flag가 mechanical일 때만)
                         logging.info(f'step4 is finished 감지됨 (flag: {flag})')
                         return
-                    elif 'step4 is finished' and 'step3 is finished' in content and flag == 'All':
+                    elif flag == 'All' and 'step3 is finished' in content and 'step4 is finished' in content:
                         logging.info(f'step3 & step4 is finished 감지됨 (flag: {flag})')
                         return                
                 await asyncio.sleep(5) # 5초 대기 (비동기)
