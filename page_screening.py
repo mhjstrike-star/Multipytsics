@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtGui                      import QFont
 from PySide6.QtCore                     import Qt, QThread, Signal
 from PySide6.QtWidgets                  import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
@@ -6,9 +8,10 @@ from functions.screening_functions      import generate_screening_design
 class ScreeningWorker(QThread):
     design_ready = Signal(dict)
     generation_failed = Signal(str)
-    def __init__(self, design_variables, sample_count, parent):
+    def __init__(self, design_variables, requested_count, sample_count, parent):
         super().__init__(parent)
         self.design_variables = design_variables
+        self.requested_count = requested_count
         self.sample_count = sample_count
 
     def run(self):
@@ -185,8 +188,8 @@ class PageScreening(QWidget):
         bottom_layout.setContentsMargins(10, 10, 10, 10)
         bottom_layout.addWidget(QLabel('실험점 수'))
         self.sample_count = QSpinBox()
-        self.sample_count.setRange(3, 1000)
-        self.sample_count.setValue(6)
+        self.sample_count.setRange(3, 2_147_483_647)
+        self.sample_count.setValue(self.maximum_sample_count() if len(self.main_window.DV) >= 2 else 6)
         self.sample_count.setToolTip('각 설계변수는 하한·중간값·상한의 3수준을 사용합니다.')
         bottom_layout.addWidget(self.sample_count)
         self.execute_button = QPushButton('실행')
@@ -211,11 +214,29 @@ class PageScreening(QWidget):
             self.monitor_display.setPlainText('Main에서 설계변수를 두 개 이상 확정해 주세요.')
             return
 
-        sample_count = self.sample_count.value()
-        self.monitor_display.setPlainText(f'실험점 {sample_count}개를 생성하는 중입니다.')
+        work_dir = self.main_window.WDIR
+        if not work_dir or not Path(work_dir).is_dir():
+            self.monitor_display.setPlainText('Main에서 해석 폴더를 지정하고 설계변수를 확정해 주세요.')
+            return
+
+        result_dir = Path(work_dir) / 'Screening_Result'
+        try:
+            result_dir.mkdir(exist_ok=True)
+        except OSError as error:
+            self.monitor_display.setPlainText(f'Screening_Result 폴더를 만들 수 없습니다.\n{error}')
+            return
+
+        requested_count = self.sample_count.value()
+        sample_count = min(requested_count, self.maximum_sample_count())
+        if requested_count > sample_count:
+            self.monitor_display.setPlainText(
+                f'요청한 {requested_count:,}점이 생성 상한을 넘었습니다. 최대 {sample_count:,}점을 생성합니다.'
+            )
+        else:
+            self.monitor_display.setPlainText(f'실험점 {sample_count:,}개를 생성하는 중입니다.')
         self.execute_button.setEnabled(False)
         self.sample_count.setEnabled(False)
-        self.worker = ScreeningWorker(design_variables, sample_count, self)
+        self.worker = ScreeningWorker(design_variables, requested_count, sample_count, self)
         self.worker.design_ready.connect(self.show_design)
         self.worker.generation_failed.connect(self.show_generation_error)
         self.worker.finished.connect(self.finish_generation)
@@ -227,17 +248,36 @@ class PageScreening(QWidget):
             return
 
         names = design['names']
+        output_names = [variable['NAME'] for variable in self.main_window.OV]
+        headers = [*names, *output_names]
         points = design['points']
-        self.design_table.setColumnCount(len(names))
-        self.design_table.setHorizontalHeaderLabels(names)
+        self.design_table.setColumnCount(len(headers))
+        self.design_table.setHorizontalHeaderLabels(headers)
         self.design_table.setRowCount(len(points))
         for row, point in enumerate(points):
             for column, value in enumerate(point):
                 self.design_table.setItem(row, column, QTableWidgetItem(str(float(value))))
+            for column in range(len(names), len(headers)):
+                self.design_table.setItem(row, column, QTableWidgetItem('—'))
+        self.design_table.resizeColumnsToContents()
         oa_counts = design['oa_counts']
-        method = 'OA' if len(points) in oa_counts else 'Near OA'
+        orthogonality = design['orthogonality']
+        method = 'OA' if orthogonality >= 1.0 - 1e-12 else 'Near OA'
         available = ', '.join(map(str, oa_counts)) or '없음'
-        self.monitor_display.setPlainText(f"{method} 실험점 {len(points)}개 생성 완료\n직교성 {design['orthogonality']:.2%}\n가능한 정규 OA 실험점 수 {available}")
+        requested = self.worker.requested_count
+        actual = len(points)
+        messages = [
+            f'{method} 실험점 {actual}개 생성 완료',
+            f'요청 {requested}점 · 생성 {actual}점 · 직교성 {orthogonality:.2%}',
+        ]
+        if requested > self.worker.sample_count:
+            messages.append(
+                f'요청 점 수가 생성 상한 {self.worker.sample_count:,}점을 넘어 상한값으로 실행했습니다.'
+            )
+        if actual < self.worker.sample_count:
+            messages.append(f'ToolBox가 요청보다 적은 {actual:,}점을 반환했습니다. 생성된 실험표를 표시합니다.')
+        messages.append(f'가능한 정규 OA 실험점 수 {available}')
+        self.monitor_display.setPlainText('\n'.join(messages))
 
     def show_generation_error(self, message):
         self.monitor_display.setPlainText(f'실험표 생성 실패\n{message}')
@@ -252,10 +292,16 @@ class PageScreening(QWidget):
         if self.worker is not None:
             self.worker.wait()
 
+    def maximum_sample_count(self):
+        # Each confirmed variable has three levels. Keep the preview at most 1,000 rows.
+        return min(1000, 3 ** len(self.main_window.DV))
+
     def refresh_table(self):
         self.design_table.setRowCount(0)
         self.design_table.setColumnCount(0)
         self.monitor_display.clear()
+        if len(self.main_window.DV) >= 2:
+            self.sample_count.setValue(self.maximum_sample_count())
         if self.main_window.DV: # 설계 변수 테이블 업데이트
             self.table.setRowCount(len(self.main_window.DV))
             for i, item in enumerate(self.main_window.DV):

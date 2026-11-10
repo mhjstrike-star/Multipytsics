@@ -38,19 +38,21 @@ def generate_screening_design(design_variables, sample_count):
         if status not in (0, 1, 2, 3):
             raise RuntimeError(f"가능한 OA 실험점 수를 조회하지 못했습니다 (OAG 상태 코드 {status}).")
         status, _, level_codes, orthogonality = generator.generator(sample_count)
+        if status in (1, 2, 3):
+            raise ValueError(f"ToolBox가 {sample_count}점에 사용할 실험표를 결정하지 못했습니다. 다른 실험점 수를 입력해 주세요 (OAG 상태 코드 {status}).")
         if status != 0:
             raise ValueError(f"실험점 {sample_count}개를 생성할 수 없습니다 (OAG 상태 코드 {status}).")
 
     level_codes = np.asarray(level_codes)
-    if level_codes.size != sample_count * len(names):
-        actual_count = level_codes.size // len(names)
-        raise ValueError(f"실험점 {sample_count}개를 요청했지만 ToolBox는 {actual_count}개를 반환했습니다.")
+    actual_count, remaining = divmod(level_codes.size, len(names))
+    if remaining or not 0 < actual_count <= sample_count:
+        raise RuntimeError("ToolBox가 유효하지 않은 크기의 실험표를 반환했습니다.")
     if not np.issubdtype(level_codes.dtype, np.integer) or ((level_codes < 1) | (level_codes > 3)).any():
         raise RuntimeError("ToolBox가 1~3 범위를 벗어난 수준 번호를 반환했습니다.")
 
     # The Windows OAG wrapper can pack two 32-bit row counts into one integer.
     oa_counts = sorted({count for value in available_counts for count in (int(value) & 0xffffffff, int(value) >> 32) if count > 0})
-    points = levels[np.arange(len(names)), level_codes.reshape(sample_count, len(names)) - 1]
+    points = levels[np.arange(len(names)), level_codes.reshape(actual_count, len(names)) - 1]
     return {
         'names': names,
         'points': points,
@@ -60,7 +62,6 @@ def generate_screening_design(design_variables, sample_count):
 
 
 def main():
-        
     # 입력파라미터 설정 ----------------------------        
     iprint = True    
     # --------------------------------------------        
