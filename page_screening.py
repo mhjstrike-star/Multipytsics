@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtGui                      import QFont
 from PySide6.QtCore                     import Qt, QThread, Signal
 from PySide6.QtWidgets                  import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
-from functions.screening_functions      import generate_screening_design, save_screening_run_table
+from functions.screening_functions      import generate_screening_design, save_screening_problem_formulator, save_screening_run_table
 
 class ScreeningWorker(QThread):
     design_ready = Signal(dict)
@@ -289,6 +289,12 @@ class PageScreening(QWidget):
             messages.append(f'Runcount_Total.csv 저장 실패. 파일이 열려 있는지 확인해 주세요.\n{error}')
         else:
             messages.append(f'저장 완료 {saved_path}')
+        try:
+            problem_path = save_screening_problem_formulator(result_dir, self.worker.design_variables, self.main_window.IV_list)
+        except OSError as error:
+            messages.append(f'ProblemFormulator.csv 저장 실패.\n{error}')
+        else:
+            messages.append(f'저장 완료 {problem_path}')
         self.monitor_display.setPlainText('\n'.join(messages))
 
     def show_generation_error(self, message):

@@ -61,25 +61,35 @@ def generate_screening_design(design_variables, sample_count):
         'oa_counts': oa_counts,
     }
 
-
 def save_screening_run_table(result_dir, headers, rows):
-    path = result_dir / 'Runcount_Total.csv'
+    return _save_csv(result_dir / 'Runcount_Total.csv', [headers, *rows])
+
+def save_screening_problem_formulator(result_dir, design_variables, input_variables):
+    initial_values = {variable['NAME'].strip(): variable['Value'] for variable in input_variables}
+    rows = [('Design Variables',), ('', 'Name', 'Initial', 'Lower', 'Upper', 'Type'),]
+    for variable in design_variables:
+        name = variable['NAME'].strip()
+        lower = variable['LV']
+        upper = variable['UV']
+        initial = initial_values.get(name)
+        if initial is None or not lower <= initial <= upper:
+            initial = lower / 2 + upper / 2
+        rows.append(('', name, initial, lower, upper, 'Continuous'))
+    rows.extend([('Objectives',), ('', 'Name', 'Initial', 'Obj. Type', 'Obj. Target', 'Obj. Weight'), ('Constraints',), ('', 'Name', 'Initial', 'Cons. Lower', 'Cons. Upper'),])
+    return _save_csv(result_dir / 'ProblemFormulator.csv', rows)
+
+def _save_csv(path, rows):
     # Keep an existing result intact if writing fails or Excel has it open.
     temporary_path = None
     try:
-        with NamedTemporaryFile(
-            mode='w', encoding='utf-8-sig', newline='', dir=result_dir, delete=False
-        ) as temporary:
+        with NamedTemporaryFile(mode='w', encoding='utf-8-sig', newline='', dir=path.parent, delete=False) as temporary:
             temporary_path = Path(temporary.name)
-            writer = csv.writer(temporary)
-            writer.writerow(headers)
-            writer.writerows(rows)
+            csv.writer(temporary).writerows(rows)
         temporary_path.replace(path)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
     return path
-
 
 def main():
     # 입력파라미터 설정 ----------------------------        
