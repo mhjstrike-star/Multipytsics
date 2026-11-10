@@ -1,0 +1,9 @@
+# Python caches and bytecode
+__pycache__/
+*.py[co]
+
+# Local virtual environment
+/.venv/
+
+# Generated analysis work files and results
+/task/
