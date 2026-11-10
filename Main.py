@@ -2,12 +2,13 @@ import sys
 import os
 
 # 현재 스크립트의 디렉토리를 Python 경로에 추가 (batch 파일 실행 시 import 오류 해결)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_DIR)
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QStackedWidget, QLabel)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 
 from page_main import PageMain
 from page_screening import PageScreening
@@ -173,6 +174,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         # 창 설정
         self.setWindowTitle('Multi-Physics Software')
+        self.setWindowIcon(QIcon(os.path.join(PROJECT_DIR, 'Image', 'PIDOTECH_LOGO.png')))
         
         # 초기 크기 설정
         screen_geometry = QApplication.primaryScreen().availableGeometry()
