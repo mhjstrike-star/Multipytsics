@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtGui                      import QFont
 from PySide6.QtCore                     import Qt, QThread, Signal
 from PySide6.QtWidgets                  import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
-from functions.screening_functions      import generate_screening_design, save_screening_problem_formulator, save_screening_run_table
+from functions.screening_functions      import generate_screening_design, save_screening_options, save_screening_problem_formulator, save_screening_run_table
 
 class ScreeningWorker(QThread):
     design_ready = Signal(dict)
@@ -214,25 +214,20 @@ class PageScreening(QWidget):
         if len(design_variables) < 2:
             self.monitor_display.setPlainText('Main에서 설계변수를 두 개 이상 확정해 주세요.')
             return
-
         work_dir = self.main_window.WDIR
         if not work_dir or not Path(work_dir).is_dir():
             self.monitor_display.setPlainText('Main에서 해석 폴더를 지정하고 설계변수를 확정해 주세요.')
             return
-
         result_dir = Path(work_dir) / 'Screening_Result'
         try:
             result_dir.mkdir(exist_ok=True)
         except OSError as error:
             self.monitor_display.setPlainText(f'Screening_Result 폴더를 만들 수 없습니다.\n{error}')
             return
-
         requested_count = self.sample_count.value()
         sample_count = min(requested_count, self.maximum_sample_count())
         if requested_count > sample_count:
-            self.monitor_display.setPlainText(
-                f'요청한 {requested_count:,}점이 생성 상한을 넘었습니다. 최대 {sample_count:,}점을 생성합니다.'
-            )
+            self.monitor_display.setPlainText(f'요청한 {requested_count:,}점이 생성 상한을 넘었습니다. 최대 {sample_count:,}점을 생성합니다.')
         else:
             self.monitor_display.setPlainText(f'실험점 {sample_count:,}개를 생성하는 중입니다.')
         self.execute_button.setEnabled(False)
@@ -245,20 +240,14 @@ class PageScreening(QWidget):
 
     def show_design(self, design):
         result_dir = self.worker.result_dir
-        if (
-            self.worker.design_variables != self.main_window.DV
-            or Path(self.main_window.WDIR) != result_dir.parent
-        ):
+        if (self.worker.design_variables != self.main_window.DV or Path(self.main_window.WDIR) != result_dir.parent):
             self.monitor_display.setPlainText('설계변수 또는 작업 폴더가 변경되었습니다. 새 조건으로 다시 실행해 주세요.')
             return
 
         output_names = [variable['NAME'] for variable in self.main_window.OV]
         headers = ['No', *design['names'], *output_names]
         pending_outputs = [''] * len(output_names)
-        rows = [
-            (index, *map(float, point), *pending_outputs)
-            for index, point in enumerate(design['points'])
-        ]
+        rows = [(index, *map(float, point), *pending_outputs) for index, point in enumerate(design['points'])]
         self.design_table.setColumnCount(len(headers))
         self.design_table.setHorizontalHeaderLabels(headers)
         self.design_table.setRowCount(len(rows))
@@ -272,14 +261,9 @@ class PageScreening(QWidget):
         available = ', '.join(map(str, oa_counts)) or '없음'
         requested = self.worker.requested_count
         actual = len(rows)
-        messages = [
-            f'{method} 실험점 {actual}개 생성 완료',
-            f'요청 {requested}점 · 생성 {actual}점 · 직교성 {orthogonality:.2%}',
-        ]
+        messages = [f'{method} 실험점 {actual}개 생성 완료', f'요청 {requested}점 · 생성 {actual}점 · 직교성 {orthogonality:.2%}',]
         if requested > self.worker.sample_count:
-            messages.append(
-                f'요청 점 수가 생성 상한 {self.worker.sample_count:,}점을 넘어 상한값으로 실행했습니다.'
-            )
+            messages.append(f'요청 점 수가 생성 상한 {self.worker.sample_count:,}점을 넘어 상한값으로 실행했습니다.')
         if actual < self.worker.sample_count:
             messages.append(f'ToolBox가 요청보다 적은 {actual:,}점을 반환했습니다. 생성된 실험표를 표시합니다.')
         messages.append(f'가능한 정규 OA 실험점 수 {available}')
@@ -295,6 +279,12 @@ class PageScreening(QWidget):
             messages.append(f'ProblemFormulator.csv 저장 실패.\n{error}')
         else:
             messages.append(f'저장 완료 {problem_path}')
+        try:
+            option_path = save_screening_options(result_dir)
+        except OSError as error:
+            messages.append(f'SCREEN_OPTION.csv 저장 실패.\n{error}')
+        else:
+            messages.append(f'저장 완료 {option_path}')
         self.monitor_display.setPlainText('\n'.join(messages))
 
     def show_generation_error(self, message):

@@ -83,11 +83,15 @@ def save_screening_problem_formulator(result_dir, design_variables, input_variab
         rows.append(('', name, 0, 'None', 200))
     return _save_csv(result_dir / 'ProblemFormulator.csv', rows)
 
-def _save_csv(path, rows):
+def save_screening_options(result_dir):
+    rows = [('Minimal', 'FALSE'), ('Recommend', 'TRUE'), ('User-defined', 20), ('Sampling', -1),]
+    return _save_csv(result_dir / 'SCREEN_OPTION.csv', rows, encoding='utf-8')
+
+def _save_csv(path, rows, *, encoding='utf-8-sig'):
     # Keep an existing result intact if writing fails or Excel has it open.
     temporary_path = None
     try:
-        with NamedTemporaryFile(mode='w', encoding='utf-8-sig', newline='', dir=path.parent, delete=False) as temporary:
+        with NamedTemporaryFile(mode='w', encoding=encoding, newline='', dir=path.parent, delete=False) as temporary:
             temporary_path = Path(temporary.name)
             csv.writer(temporary).writerows(rows)
         temporary_path.replace(path)
