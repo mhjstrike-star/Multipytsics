@@ -1,10 +1,63 @@
-import numpy as np
 import os
-from os import sys
 import platform
 import asyncio
 import logging
-from AIDPreprocessing import AIDPrep
+import numpy as np
+
+from shutil                         import copytree
+from pathlib                        import Path
+from tempfile                       import TemporaryDirectory
+from AIDPreprocessing               import AIDPrep
+
+def generate_screening_design(design_variables, sample_count):
+    if len(design_variables) < 2:
+        raise ValueError("Near OA Screening에는 설계변수를 두 개 이상 선택해 주세요.")
+    if type(sample_count) is not int or sample_count < 3:
+        raise ValueError("실험점 수는 3 이상의 정수여야 합니다.")
+    
+    names = [variable['NAME'].strip() for variable in design_variables]
+    if any(not name for name in names) or len(set(names)) != len(names):
+        raise ValueError("설계변수 이름은 비어 있거나 중복될 수 없습니다.")
+
+    bounds = np.array([[variable['LV'], variable['UV']] for variable in design_variables], dtype=float)
+    lower, upper = bounds.T
+    middle = lower / 2 + upper / 2
+    if not np.isfinite(bounds).all() or not ((lower < middle) & (middle < upper)).all():
+        raise ValueError("각 설계변수에 서로 다른 하한·중간값·상한을 지정해 주세요.")
+    levels = np.column_stack((lower, middle, upper))
+
+    import OAG
+    database = Path(OAG.__file__).parent / 'externals' / 'OADB'
+    with TemporaryDirectory(prefix='screening-oag-') as scratch:
+        work_dir = Path(scratch)
+        # OAG opens its database for write access even when querying OA sizes.
+        writable_database = work_dir / 'OADB'
+        copytree(database, writable_database)
+        generator = OAG.OAgenerator(nLv=[3] * len(names), cpath=work_dir.as_posix() + '/', dpath=writable_database.as_posix() + '/',)
+        status, available_counts, _, _ = generator.generator(0)
+        if status not in (0, 1, 2, 3):
+            raise RuntimeError(f"가능한 OA 실험점 수를 조회하지 못했습니다 (OAG 상태 코드 {status}).")
+        status, _, level_codes, orthogonality = generator.generator(sample_count)
+        if status != 0:
+            raise ValueError(f"실험점 {sample_count}개를 생성할 수 없습니다 (OAG 상태 코드 {status}).")
+
+    level_codes = np.asarray(level_codes)
+    if level_codes.size != sample_count * len(names):
+        actual_count = level_codes.size // len(names)
+        raise ValueError(f"실험점 {sample_count}개를 요청했지만 ToolBox는 {actual_count}개를 반환했습니다.")
+    if not np.issubdtype(level_codes.dtype, np.integer) or ((level_codes < 1) | (level_codes > 3)).any():
+        raise RuntimeError("ToolBox가 1~3 범위를 벗어난 수준 번호를 반환했습니다.")
+
+    # The Windows OAG wrapper can pack two 32-bit row counts into one integer.
+    oa_counts = sorted({count for value in available_counts for count in (int(value) & 0xffffffff, int(value) >> 32) if count > 0})
+    points = levels[np.arange(len(names)), level_codes.reshape(sample_count, len(names)) - 1]
+    return {
+        'names': names,
+        'points': points,
+        'orthogonality': float(orthogonality),
+        'oa_counts': oa_counts,
+    }
+
 
 def main():
         
@@ -58,10 +111,7 @@ def main():
     refined_pset = np.delete( aidprep.pset, del_idx, axis = 0)
     refined_indices = np.delete( aidprep.indices, del_idx, axis = 0)    
     aidprep.write_resultfile_for_report(add_data_by_logic = False, refined_pset = refined_pset, refined_indices = refined_indices)
-    
     exit()
-
 
 if __name__ == '__main__':
     main()
-    

@@ -1,20 +1,34 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QPushButton, QPlainTextEdit, QSplitter
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui                      import QFont
+from PySide6.QtCore                     import Qt, QThread, Signal
+from PySide6.QtWidgets                  import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from functions.screening_functions      import generate_screening_design
 
+class ScreeningWorker(QThread):
+    design_ready = Signal(dict)
+    generation_failed = Signal(str)
+    def __init__(self, design_variables, sample_count, parent):
+        super().__init__(parent)
+        self.design_variables = design_variables
+        self.sample_count = sample_count
+
+    def run(self):
+        try: design = generate_screening_design(self.design_variables, self.sample_count)
+        except Exception as error: self.generation_failed.emit(str(error))
+        else: self.design_ready.emit(design)
 
 class PageScreening(QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window  # Main 창 참조
+        self.worker = None
         self.init_ui()
+        QApplication.instance().aboutToQuit.connect(self.wait_for_worker)
     
     def init_ui(self):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
-        
-        # 제목
+
         title = QLabel('Screening')
         title_font = QFont()
         title_font.setPointSize(16)
@@ -48,42 +62,31 @@ class PageScreening(QWidget):
         self.table.setHorizontalHeaderLabels(['설계변수', '하한 값', '상한 값', '단위'])
         
         # 테이블 스타일 설정
-        self.table.setEditTriggers(
-            QAbstractItemView.DoubleClicked |
-            QAbstractItemView.SelectedClicked |
-            QAbstractItemView.AnyKeyPressed
-        )
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setStyleSheet("""
             QTableWidget {
                 background-color: #2d2d2d;
                 gridline-color: #404040;
-                border: 1px solid #404040;
-            }
+                border: 1px solid #404040;}
             QTableWidget::item {
                 padding: 5px;
                 color: #e0e0e0;
-                font-size: 12px;
-            }
+                font-size: 12px;}
             QTableWidget QLineEdit {
                 font-size: 12px;
                 padding: 4px;
                 background-color: #3d3d3d;
                 color: #e0e0e0;
-                border: 1px solid #0d47a1;
-            }
+                border: 1px solid #0d47a1;}
             QTableWidget::item:selected {
-                background-color: #0d47a1;
-            }
+                background-color: #0d47a1;}
             QHeaderView::section {
                 background-color: #0d47a1;
                 color: #ffffff;
                 padding: 5px;
                 border: none;
                 font-weight: bold;
-                font-size: 11px;
-            }
-        """)
-        
+                font-size: 11px;}""")
         left_layout.addWidget(self.table, 1)
         
         # 출력 변수 레이블
@@ -139,7 +142,14 @@ class PageScreening(QWidget):
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(5)
-        
+        design_label = QLabel('생성된 실험표')
+        design_label.setFont(design_var_font)
+        right_layout.addWidget(design_label)
+        self.design_table = QTableWidget()
+        self.design_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.design_table.setStyleSheet(self.table.styleSheet())
+        right_layout.addWidget(self.design_table, 2)
+
         # 모니터링 레이블
         log_label = QLabel('실행 로그')
         log_font = QFont()
@@ -170,76 +180,107 @@ class PageScreening(QWidget):
         splitter.setSizes([50, 50])
         main_layout.addWidget(splitter, 5)
         
-        # ============= 좌측 50% + 우측 50% 스플리터 종료 =============
-        
         # 하단: 실행 버튼
         bottom_layout = QHBoxLayout()
         bottom_layout.setContentsMargins(10, 10, 10, 10)
-        
-        btn_execute = QPushButton('실행')
-        btn_execute.setMinimumHeight(40)
-        btn_execute.setMaximumWidth(150)
-        btn_execute.clicked.connect(self.on_execute)
-        bottom_layout.addWidget(btn_execute)
-        
+        bottom_layout.addWidget(QLabel('실험점 수'))
+        self.sample_count = QSpinBox()
+        self.sample_count.setRange(3, 1000)
+        self.sample_count.setValue(6)
+        self.sample_count.setToolTip('각 설계변수는 하한·중간값·상한의 3수준을 사용합니다.')
+        bottom_layout.addWidget(self.sample_count)
+        self.execute_button = QPushButton('실행')
+        self.execute_button.setMinimumHeight(40)
+        self.execute_button.setMaximumWidth(150)
+        self.execute_button.clicked.connect(self.on_execute)
+        bottom_layout.addWidget(self.execute_button)
         bottom_layout.addStretch()
-        
         bottom_widget = QWidget()
         bottom_widget.setLayout(bottom_layout)
-        main_layout.addWidget(bottom_widget, 1)
-        
+        main_layout.addWidget(bottom_widget)
         self.setLayout(main_layout)
     
     def on_execute(self):
-        """실행 버튼 클릭 시 호출"""
-        # 실행 로직 추가 (현재는 비워둠)
-        pass
-    
+        if self.worker is not None:
+            return
+
+        self.design_table.setRowCount(0)
+        self.design_table.setColumnCount(0)
+        design_variables = [variable.copy() for variable in self.main_window.DV]
+        if len(design_variables) < 2:
+            self.monitor_display.setPlainText('Main에서 설계변수를 두 개 이상 확정해 주세요.')
+            return
+
+        sample_count = self.sample_count.value()
+        self.monitor_display.setPlainText(f'실험점 {sample_count}개를 생성하는 중입니다.')
+        self.execute_button.setEnabled(False)
+        self.sample_count.setEnabled(False)
+        self.worker = ScreeningWorker(design_variables, sample_count, self)
+        self.worker.design_ready.connect(self.show_design)
+        self.worker.generation_failed.connect(self.show_generation_error)
+        self.worker.finished.connect(self.finish_generation)
+        self.worker.start()
+
+    def show_design(self, design):
+        if self.worker.design_variables != self.main_window.DV:
+            self.monitor_display.setPlainText('설계변수가 변경되었습니다. 새 조건으로 다시 실행해 주세요.')
+            return
+
+        names = design['names']
+        points = design['points']
+        self.design_table.setColumnCount(len(names))
+        self.design_table.setHorizontalHeaderLabels(names)
+        self.design_table.setRowCount(len(points))
+        for row, point in enumerate(points):
+            for column, value in enumerate(point):
+                self.design_table.setItem(row, column, QTableWidgetItem(str(float(value))))
+        oa_counts = design['oa_counts']
+        method = 'OA' if len(points) in oa_counts else 'Near OA'
+        available = ', '.join(map(str, oa_counts)) or '없음'
+        self.monitor_display.setPlainText(f"{method} 실험점 {len(points)}개 생성 완료\n직교성 {design['orthogonality']:.2%}\n가능한 정규 OA 실험점 수 {available}")
+
+    def show_generation_error(self, message):
+        self.monitor_display.setPlainText(f'실험표 생성 실패\n{message}')
+
+    def finish_generation(self):
+        self.worker.deleteLater()
+        self.worker = None
+        self.execute_button.setEnabled(True)
+        self.sample_count.setEnabled(True)
+
+    def wait_for_worker(self):
+        if self.worker is not None:
+            self.worker.wait()
+
     def refresh_table(self):
-        """Main page에서 호출: DV와 OV 데이터로 테이블 업데이트"""
-        # 설계 변수 테이블 업데이트
-        if self.main_window.DV:
+        self.design_table.setRowCount(0)
+        self.design_table.setColumnCount(0)
+        self.monitor_display.clear()
+        if self.main_window.DV: # 설계 변수 테이블 업데이트
             self.table.setRowCount(len(self.main_window.DV))
-            
             for i, item in enumerate(self.main_window.DV):
-                # 행 높이 설정
                 self.table.setRowHeight(i, 35)
-                
                 name = item.get('NAME', '')
                 unit = item.get('UNIT', '')
                 lv = item.get('LV', 0)  # 하한값
                 uv = item.get('UV', 0)  # 상한값
-                
-                # 0열: 설계변수 (NAME)
-                self.table.setItem(i, 0, QTableWidgetItem(name))
-                # 1열: 하한값 (LV)
-                self.table.setItem(i, 1, QTableWidgetItem(f'{lv:.3f}'))
-                # 2열: 상한값 (UV)
-                self.table.setItem(i, 2, QTableWidgetItem(f'{uv:.3f}'))
-                # 3열: 단위 (UNIT)
-                self.table.setItem(i, 3, QTableWidgetItem(unit))
+                self.table.setItem(i, 0, QTableWidgetItem(name)) # 0열: 설계변수 (NAME)
+                self.table.setItem(i, 1, QTableWidgetItem(str(lv))) # 1열: 하한값 (LV)
+                self.table.setItem(i, 2, QTableWidgetItem(str(uv))) # 2열: 상한값 (UV)
+                self.table.setItem(i, 3, QTableWidgetItem(unit)) # 3열: 단위 (UNIT)
         else:
-            # DV가 비어있으면 테이블 초기화
-            self.table.setRowCount(0)
+            self.table.setRowCount(0) # DV가 비어있으면 테이블 초기화
         
         # 출력 변수 테이블 업데이트
         if self.main_window.OV:
             self.output_table.setRowCount(len(self.main_window.OV))
-            
             for i, item in enumerate(self.main_window.OV):
-                # 행 높이 설정
                 self.output_table.setRowHeight(i, 35)
-                
                 name = item.get('NAME', '')
                 target_error = item.get('TARGET_ERROR', '')
-                
-                # 0열: 출력변수 (NAME)
-                self.output_table.setItem(i, 0, QTableWidgetItem(name))
-                # 1열: 목표 오차율 (정수/실수를 문자열로 변환)
-                self.output_table.setItem(i, 1, QTableWidgetItem(str(target_error)))
-                # 2열: 생성여부 (콤보박스 - 읽기 전용으로 표시)
+                self.output_table.setItem(i, 0, QTableWidgetItem(name)) # 0열: 출력변수 (NAME)
+                self.output_table.setItem(i, 1, QTableWidgetItem(str(target_error))) # 1열: 목표 오차율 (정수/실수를 문자열로 변환), 2열: 생성여부 (콤보박스 - 읽기 전용으로 표시)
                 label = QLabel('선택됨')
                 self.output_table.setCellWidget(i, 2, label)
         else:
-            # OV가 비어있으면 테이블 초기화
-            self.output_table.setRowCount(0)
+            self.output_table.setRowCount(0) # OV가 비어있으면 테이블 초기화
