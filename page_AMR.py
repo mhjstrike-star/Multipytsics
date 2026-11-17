@@ -1,15 +1,12 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QDoubleSpinBox, QPushButton, QAbstractSpinBox, QPlainTextEdit, QSplitter, QLineEdit, QFileDialog, QScrollArea
-from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QFont
-import functions.amr_functions as amr  # AMR 관련 함수 모듈 임포트
 import os
 import asyncio
-import multiprocessing as mp   
+import multiprocessing                  as mp   
+import functions.amr_functions          as amr  # AMR 관련 함수 모듈 임포트
+from PySide6.QtGui                      import QFont
+from PySide6.QtCore                     import Qt, QTimer, QThread, Signal
+from PySide6.QtWidgets                  import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QDoubleSpinBox, QPushButton, QAbstractSpinBox, QPlainTextEdit, QSplitter, QLineEdit, QFileDialog, QScrollArea
 
 class AMRWorker(mp.Process):
-    """AMR 실행을 위한 워커 스레드"""
-   
-    
     def __init__(self, nx, nobj, ncon, xl, xu, size_limit, accuracy_limit, cpath, opath, rpm4fl, ip, xname, yname, Unit, what,restart=False, ppath=None):
         super().__init__()
         self.nx = nx
@@ -32,9 +29,6 @@ class AMRWorker(mp.Process):
         self._task = None  # ⭐ 초기화 추가
     
     def run(self):
-        """워커 스레드에서 실행될 코드"""
- 
-            
         try:
             # Task 생성 및 저장 
             result = amr.main(
@@ -53,19 +47,12 @@ class AMRWorker(mp.Process):
                 restart=self.restart,
                 ppath=self.ppath
             )
-            
-            # Task 실행 완료 대기
-            self.log_display.appendPlainText("Task finished")
-            
-            
-                
+            self.log_display.appendPlainText("Task finished") # Task 실행 완료 대기
         except Exception as e:
             self.log_display.appendPlainText(f"Error: {str(e)}")
 
     def stop(self):
-        """프로세스 종료"""
-        if self.is_alive():
-            self.terminate()
+        if self.is_alive(): self.terminate()
 
 class PageAMR(QWidget):
     def __init__(self, main_window):
@@ -117,11 +104,7 @@ class PageAMR(QWidget):
         self.table.setHorizontalHeaderLabels(['설계변수', '하한 값', '상한 값', '단위'])
         
         # 테이블 스타일 설정
-        self.table.setEditTriggers(
-            QAbstractItemView.DoubleClicked |
-            QAbstractItemView.SelectedClicked |
-            QAbstractItemView.AnyKeyPressed
-        )
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.AnyKeyPressed)
         self.table.setStyleSheet("""
             QTableWidget {
                 background-color: #2d2d2d;
@@ -150,9 +133,7 @@ class PageAMR(QWidget):
                 border: none;
                 font-weight: bold;
                 font-size: 11px;
-            }
-        """)
-        
+            }""")
         left_layout.addWidget(self.table, 1)
         
         # 출력 변수 레이블
@@ -163,18 +144,12 @@ class PageAMR(QWidget):
         output_var_label.setFont(output_var_font)
         output_var_label.setFixedHeight(30)
         left_layout.addWidget(output_var_label)
-        
         # 출력 변수 테이블 생성 (3 x n: NAME, 목표 오차율, 생성여부)
         self.output_table = QTableWidget()
         self.output_table.setColumnCount(3)
         self.output_table.setHorizontalHeaderLabels(['출력변수', '목표 오차율', '생성여부'])
-        
         # 출력 테이블 스타일 설정
-        self.output_table.setEditTriggers(
-            QAbstractItemView.DoubleClicked |
-            QAbstractItemView.SelectedClicked |
-            QAbstractItemView.AnyKeyPressed
-        )
+        self.output_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.AnyKeyPressed)
         self.output_table.setStyleSheet("""
             QTableWidget {
                 background-color: #2d2d2d;
@@ -196,9 +171,7 @@ class PageAMR(QWidget):
                 border: none;
                 font-weight: bold;
                 font-size: 11px;
-            }
-        """)
-        
+            }""")
         left_layout.addWidget(self.output_table, 1)
         
         # 파라미터 입력 섹션
@@ -242,30 +215,23 @@ class PageAMR(QWidget):
         params_layout.addWidget(convergence_label)
         params_layout.addWidget(self.convergence_spinbox)
         params_layout.addStretch()
-        
         left_layout.addLayout(params_layout)
-        
+
         # 실행 및 중단 버튼 (같은 라인)
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
-        
         btn_execute = QPushButton('실행')
         btn_execute.setMinimumHeight(35)
         btn_execute.setMaximumWidth(150)
         btn_execute.clicked.connect(self.on_execute)
         button_layout.addWidget(btn_execute)
-        
         btn_stop = QPushButton('중단')
         btn_stop.setMinimumHeight(35)
         btn_stop.setMaximumWidth(150)
         btn_stop.clicked.connect(self.stop_running)
         button_layout.addWidget(btn_stop)
-        
         button_layout.addStretch()
-        
         left_layout.addLayout(button_layout)
-
-        
         # 작업 이어하기 섹션
         continue_work_label = QLabel('작업 이어하기')
         continue_work_font = QFont()
@@ -274,39 +240,30 @@ class PageAMR(QWidget):
         continue_work_label.setFont(continue_work_font)
         continue_work_label.setFixedHeight(25)
         left_layout.addWidget(continue_work_label)
-        
         # 작업 이어하기 입력 레이아웃
         continue_layout = QHBoxLayout()
         continue_layout.setSpacing(5)
-        
         info_path_label = QLabel('파일:')
         info_path_label.setMinimumWidth(40)
         self.info_path = QLineEdit()
         self.info_path.setPlaceholderText('분석 결과 파일 선택')
         self.info_path.setMinimumHeight(30)
-        
         btn_browse = QPushButton('탐색')
         btn_browse.setMinimumHeight(30)
         btn_browse.setMaximumWidth(80)
         btn_browse.clicked.connect(self.on_browse_file)
-        
         btn_execute2 = QPushButton('실행')
         btn_execute2.setMinimumHeight(30)
         btn_execute2.setMaximumWidth(80)
         btn_execute2.clicked.connect(self.on_execute2)
-        
         continue_layout.addWidget(info_path_label)
         continue_layout.addWidget(self.info_path)
         continue_layout.addWidget(btn_browse)
         continue_layout.addWidget(btn_execute2)
-        
         left_layout.addLayout(continue_layout)
         left_layout.addStretch()
-        
         left_widget.setLayout(left_layout)
         left_widget.setMinimumWidth(0)  # 최소 너비 제거로 스플리터 비율 조절 가능
-        
-        # 좌측을 스크롤 가능하게 만들기
         scroll_area = QScrollArea()
         scroll_area.setWidget(left_widget)
         scroll_area.setWidgetResizable(True)
@@ -315,15 +272,20 @@ class PageAMR(QWidget):
             QScrollArea {
                 background-color: #1e1e1e;
                 border: none;
-            }
-        """)
+            }""")
         splitter.addWidget(scroll_area)
         
-        # ===== 우측 50%: 로그 모니터링 =====
+        # ===== 우측: 빈 영역 + 실행 로그 =====
         right_widget = QWidget()
-        right_layout = QVBoxLayout()
+        right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(5)
+        self.visualization_area = QWidget()
+        right_layout.addWidget(self.visualization_area, 2)
+        log_widget = QWidget()
+        log_layout = QVBoxLayout(log_widget)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.setSpacing(5)
         
         # 로그 모니터링 레이블
         log_label = QLabel('실행 로그')
@@ -332,7 +294,7 @@ class PageAMR(QWidget):
         log_font.setBold(True)
         log_label.setFont(log_font)
         log_label.setFixedHeight(30)
-        right_layout.addWidget(log_label)
+        log_layout.addWidget(log_label)
         
         # 로그 텍스트 영역
         self.log_display = QPlainTextEdit()
@@ -347,8 +309,8 @@ class PageAMR(QWidget):
                 border: 1px solid #404040;
             }
         """)
-        right_layout.addWidget(self.log_display, 1)
-        right_widget.setLayout(right_layout)
+        log_layout.addWidget(self.log_display, 1)
+        right_layout.addWidget(log_widget, 1)
         splitter.addWidget(right_widget)
         
         # 스플리터 설정
