@@ -214,7 +214,6 @@ def create_save(main_window):
     # 저장할 데이터 구조
     project_data = {
         'main': {},
-        'screening': {},
         'amr': {},
         'do': {}
     }
@@ -223,11 +222,6 @@ def create_save(main_window):
     if 'Main' in main_window.pages:
         page_main = main_window.pages['Main']
         project_data['main'] = _extract_main_data(page_main)
-    
-    # Screening 페이지 데이터 추출
-    if 'Screening' in main_window.pages:
-        page_screening = main_window.pages['Screening']
-        project_data['screening'] = _extract_screening_data(page_screening)
     
     # AMR 페이지 데이터 추출
     if 'AMR' in main_window.pages:
@@ -279,14 +273,9 @@ def create_load(main_window):
         page_main = main_window.pages['Main']
         _load_main_data(page_main, project_data['main'])
         
-        # on_confirm_design_variables2 실행 (AMR이나 Screening에 데이터가 있으면)
-        if project_data.get('amr') or project_data.get('screening'):
+        # AMR 데이터가 있으면 설계변수 갱신
+        if project_data.get('amr'):
             page_main.on_confirm_design_variables2()
-    
-    # Screening 페이지 데이터 적용
-    if 'Screening' in main_window.pages and project_data.get('screening'):
-        page_screening = main_window.pages['Screening']
-        _load_screening_data(page_screening, project_data['screening'])
     
     # AMR 페이지 데이터 적용
     if 'AMR' in main_window.pages and project_data.get('amr'):
@@ -304,7 +293,7 @@ def create_load(main_window):
 def _validate_project_file(project_data):
     """프로젝트 파일의 서식 유효성 검증"""
     # 필수 섹션 확인
-    required_sections = ['main', 'screening', 'amr', 'do']
+    required_sections = ['main', 'amr', 'do']
     for section in required_sections:
         if section not in project_data:
             return False
@@ -397,31 +386,6 @@ def _load_main_data(page_main, main_data):
     page_main.gwangju_node_input.setValue(main_data.get('gwangju_nodes', 1))
     page_main.rpm4fl_input.setText(main_data.get('rpm4fl', '100'))
     page_main.analysis_target_combo.setCurrentText(main_data.get('analysis_target', 'All'))
-
-
-def _load_screening_data(page_screening, screening_data):
-    """Screening 페이지에 데이터 적용"""
-    # 설계변수 테이블 업데이트
-    design_vars = screening_data.get('design_variables', [])
-    if design_vars:
-        page_screening.table.setRowCount(len(design_vars))
-        for row, dv in enumerate(design_vars):
-            page_screening.table.setRowHeight(row, 35)
-            
-            page_screening.table.setItem(row, 0, QTableWidgetItem(dv.get('name', '')))
-            page_screening.table.setItem(row, 1, QTableWidgetItem(dv.get('lower_limit', '')))
-            page_screening.table.setItem(row, 2, QTableWidgetItem(dv.get('upper_limit', '')))
-            page_screening.table.setItem(row, 3, QTableWidgetItem(dv.get('unit', '')))
-    
-    # 출력변수 테이블 업데이트
-    output_vars = screening_data.get('output_variables', [])
-    if output_vars:
-        page_screening.output_table.setRowCount(len(output_vars))
-        for row, ov in enumerate(output_vars):
-            page_screening.output_table.setRowHeight(row, 35)
-            
-            page_screening.output_table.setItem(row, 0, QTableWidgetItem(ov.get('name', '')))
-            page_screening.output_table.setItem(row, 1, QTableWidgetItem(ov.get('target_error', '')))
 
 
 def _load_amr_data(page_amr, amr_data):
@@ -603,36 +567,6 @@ def _extract_main_data(page_main):
     
     if hasattr(page_main, 'analysis_target_combo'):
         data['analysis_target'] = page_main.analysis_target_combo.currentText()
-    
-    return data
-
-
-def _extract_screening_data(page_screening):
-    """Screening 페이지 데이터 추출"""
-    data = {
-        'design_variables': [],
-        'output_variables': []
-    }
-    
-    # 입력변수 테이블 데이터 추출
-    if hasattr(page_screening, 'table'):
-        for row in range(page_screening.table.rowCount()):
-            row_data = {
-                'name': page_screening.table.item(row, 0).text() if page_screening.table.item(row, 0) else '',
-                'lower_limit': page_screening.table.item(row, 1).text() if page_screening.table.item(row, 1) else '',
-                'upper_limit': page_screening.table.item(row, 2).text() if page_screening.table.item(row, 2) else '',
-                'unit': page_screening.table.item(row, 3).text() if page_screening.table.item(row, 3) else ''
-            }
-            data['design_variables'].append(row_data)
-    
-    # 출력변수 테이블 데이터 추출
-    if hasattr(page_screening, 'output_table'):
-        for row in range(page_screening.output_table.rowCount()):
-            row_data = {
-                'name': page_screening.output_table.item(row, 0).text() if page_screening.output_table.item(row, 0) else '',
-                'target_error': page_screening.output_table.item(row, 1).text() if page_screening.output_table.item(row, 1) else ''
-            }
-            data['output_variables'].append(row_data)
     
     return data
 

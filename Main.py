@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
 from page_main import PageMain
-from page_screening import PageScreening
 from page_AMR import PageAMR
 from page_DO import PageDO
 
@@ -214,7 +213,6 @@ class MainWindow(QMainWindow):
         # 네비게이션 버튼 생성
         self.pages_list = [
             ('Main', PageMain),
-            ('Screening', PageScreening),
             ('AMR', PageAMR),
             ('DO', PageDO)
         ]

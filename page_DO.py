@@ -4,7 +4,92 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTable
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 import functions.do_functions as do
+import multiprocessing as mp 
+import numpy as np 
 from aGO.core.base import *
+class DOworker(mp.Process):
+    def __init__(self, DV_info,output_info,meta_path):
+        super().__init__()
+        self.DV_info = DV_info
+        self.output_info = output_info
+        self.meta_path = meta_path
+
+    def run(self):
+        """워커 스레드에서 실행될 코드"""
+ 
+        temp = do.DO(DV_info=self.DV_info, output_info=self.output_info,meta_path=self.meta_path)
+        logfile=os.path.join(self.meta_path,'aGO.log')
+           
+        if os.path.exists(logfile):
+            try:
+                os.remove(logfile)
+            except OSError as e:
+                pass
+        
+
+        # logfile이 존재하면 삭제
+        if os.path.exists(logfile):
+            try:
+                os.remove(logfile)
+            except OSError as e:
+                pass
+        try:
+            # Task 생성 및 저장 
+            aGO_Opt = aGO(ndv=temp.ndv, 
+                          ncon=temp.ncon ,
+                          xl=temp.LB, 
+                          xu=temp.UB, 
+                          obj=temp.obj,
+                          con=temp.con, 
+                          DisLvX=temp.DisLvX, 
+                          DisSetX=temp.DisSetX,
+                          iStopEval =3000,
+                          nPop_DE   = 30,
+                          nPop_CS   = 15,
+                          iTRMOP    = 10000,
+                          cpath=self.meta_path)
+            
+            if temp.ncon==0:
+                Xopt, OBJopt = aGO_Opt.run()
+                CONopt = None
+            else:
+                Xopt, OBJopt, CONopt =aGO_Opt.run()
+            print("Xopt:", Xopt)
+            print("OBJopt:", OBJopt)
+            print("CONopt:", CONopt)
+            # Task 실행 완료 대기
+            #self.log_display.appendPlainText("Task finished")
+            
+
+            initialx = np.array([(ub + lb) * 0.5 for ub, lb in zip(temp.UB, temp.LB)])
+            initialf= temp.obj(initialx)
+            initialg = temp.G 
+
+            with open(logfile, 'a', encoding='utf-8') as f:
+                f.write("[Design Variables]\n")
+                for dv_item in self.DV_info:
+                    f.write(f"{dv_item}\n")
+                f.write("\n[Output Variables]\n")
+                for output_item in self.output_info:
+                    f.write(f"{output_item}\n")
+                f.write("\n[Initial Values]\n")
+                f.write(f"initialf: {initialf}\n")
+                f.write(f"initialg: {initialg}\n")  
+                f.write("\n[Optimum Values]\n")
+                f.write(f"temp.obj: {temp.optobj}\n")
+                f.write(f"temp.con: {temp.optcon}\n")
+            
+
+                
+        except Exception as e:
+            #self.log_display.appendPlainText(f"Error: {str(e)}")
+            print(f"Error: {str(e)}")
+
+    def stop(self):
+        """프로세스 종료"""
+        if self.is_alive():
+            self.terminate()
+
 class PageDO(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -287,54 +372,22 @@ class PageDO(QWidget):
         
 
         metapath=self.metamodel_path_input.text()
-        logfile=os.path.join(metapath,'aGO.log')
-        # logfile이 존재하면 삭제
-        if os.path.exists(logfile):
-            try:
-                os.remove(logfile)
-            except OSError as e:
-                pass
-        
 
-        # logfile이 존재하면 삭제
-        if os.path.exists(logfile):
-            try:
-                os.remove(logfile)
-            except OSError as e:
-                pass
-        
-        temp = do.DO(DV_info=DV_info, output_info=output_info,meta_path=metapath)
+        self.temp =DOworker(DV_info=DV_info, output_info=output_info,meta_path=metapath)
+        #temp = do.DO(DV_info=DV_info, output_info=output_info,meta_path=metapath)
         import numpy as np
 
-        initialx = np.array([(ub + lb) * 0.5 for ub, lb in zip(temp.UB, temp.LB)])
-        initialf= temp.obj(initialx)
-        initialg = temp.G
+
         # logfile에 DV_item, output_item, initialf, initialg 기록
 
-        
-        aGO_Opt = aGO(ndv=temp.ndv, ncon=temp.ncon ,xl=temp.LB, xu=temp.UB, obj=temp.obj,con=temp.con, DisLvX=temp.DisLvX, DisSetX=temp.DisSetX,iStopEval =3000,nPop_DE   = 30,nPop_CS   = 15,iTRMOP    = 10000,cpath=metapath)
-        
-        
-        if temp.ncon==0:
-            Xopt, OBJopt = aGO_Opt.run()
-            CONopt = None
-        else:
-            Xopt, OBJopt, CONopt =aGO_Opt.run()
+        try:
+            self.temp.start()
+        except Exception as e:
+            print(f"DO 구성 실패 : {e}")
+       # aGO_Opt = aGO(ndv=temp.ndv, ncon=temp.ncon ,xl=temp.LB, xu=temp.UB, obj=temp.obj,con=temp.con, DisLvX=temp.DisLvX, DisSetX=temp.DisSetX,iStopEval =3000,nPop_DE   = 30,nPop_CS   = 15,iTRMOP    = 10000,cpath=metapath)
 
-        with open(logfile, 'a', encoding='utf-8') as f:
-            f.write("[Design Variables]\n")
-            for dv_item in DV_info:
-                f.write(f"{dv_item}\n")
-            f.write("\n[Output Variables]\n")
-            for output_item in output_info:
-                f.write(f"{output_item}\n")
-            f.write("\n[Initial Values]\n")
-            f.write(f"initialf: {initialf}\n")
-            f.write(f"initialg: {initialg}\n")    
         
-        print("Xopt:", Xopt)
-        print("OBJopt:", OBJopt)
-        print("CONopt:", CONopt)
+
     
     def browse_metamodel_folder(self):
         """폴더 탐색 버튼 클릭 시 호출"""

@@ -571,9 +571,7 @@ class PageMain(QWidget):
             print("해석 결과 폴더와 의왕 서버 IP를 입력해주세요")
             return
     
-        # 모든 페이지의 테이블 업데이트
-        if 'Screening' in self.main_window.pages:
-            self.main_window.pages['Screening'].refresh_table()
+        # AMR 페이지의 테이블 업데이트
         if 'AMR' in self.main_window.pages:
             self.main_window.pages['AMR'].refresh_table()
     def on_confirm_design_variables2(self):  # Load 용 확정 함수
@@ -630,9 +628,7 @@ class PageMain(QWidget):
             print("해석 결과 폴더와 의왕 서버 IP를 입력해주세요")
             return
     
-        # 모든 페이지의 테이블 업데이트
-        if 'Screening' in self.main_window.pages:
-            self.main_window.pages['Screening'].refresh_table()
+        # AMR 페이지의 테이블 업데이트
         if 'AMR' in self.main_window.pages:
             self.main_window.pages['AMR'].refresh_table()
 
@@ -654,5 +650,4 @@ class PageMain(QWidget):
     def on_load(self):
         """프로젝트 불러오기"""
         create_load(self.main_window)
-
 

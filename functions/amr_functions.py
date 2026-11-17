@@ -73,9 +73,9 @@ class communicator(object):
         try:
             
             
-            npt = int(len(x)/self.nx) 
-            f = np.reshape(f, (npt,self.nf))        
-            x = np.reshape(x, (npt,self.nx))
+            npt = int(len(x)/self.nx) # Sampling 결과 32케이스 32x1 list  npt = 32/4(설계변수 개수)
+            f = np.reshape(f, (npt,self.nf))    # Sampling 결과 32케이스 32x1 list -> 출력변수가 1개면 8x1     
+            x = np.reshape(x, (npt,self.nx))    # 설계 변수 4개인 경우 8x4 2d np array  
             
             
             
@@ -142,7 +142,7 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
 
     ## AMR 입력 파라미터 선정
     # 설계변수 및 성능지수 관련 파라미터
-    fl, fu           = None, None # (Default): [-self.abnormal_num]*nf / [self.abnormal_num]*nf    
+    fl, fu           = [-10000]*nf, [10000]*nf # (Default): [-self.abnormal_num]*nf / [self.abnormal_num]*nf    
        
     # 초기 설정 관련 파라미터
     n_init           = None       # 초기 실험점 개수(Sim Default: 2*nx + 1/ Tab Default: int(3*(nx+1)*(nx+2)*0.5)) 

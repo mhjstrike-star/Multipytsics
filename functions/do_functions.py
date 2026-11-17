@@ -5,11 +5,12 @@ import os
 import glob
 from IMM import MMIntegrator
 import re
+import logging
 
 def obj(self,X):
     self.F=[]  # 초기화
     self.G=[]
-
+    self.optval=None
     rcount=int(len(X)/self.ndv)
     x2d=X.reshape(rcount,self.ndv)
     G =[]
@@ -58,6 +59,10 @@ class DO:
         self.ndv = len(DV_info)
         objcount= 0
         concount=0
+        self.objname = [item.get('name') for item in output_info if item.get('objective_type') in ['목적함수(최대화)', '목적함수(최소화)']]
+        self.objcon= [item.get('name') for item in output_info if item.get('objective_type') == '구속조건']
+        self.optobj=None
+        self.optcon=None
         self.output_info = output_info
         for item in output_info:
             if item.get('objective_type') == '목적함수(최대화)' or item.get('objective_type') == '목적함수(최소화)':
@@ -95,8 +100,10 @@ class DO:
         objnames = [item.get('name') for item in self.output_info if item.get('objective_type') in ['목적함수(최대화)', '목적함수(최소화)']]
         connames = [item.get('name') for item in self.output_info if item.get('objective_type') == '구속조건']
         outnames = [item.get('name') for item in self.output_info]
-        temp=[]
+       
         for row in x2d :
+            temp=[]   # 목적함수 저장용
+            temp2=[]  # 구속조건 저장용
             result = self.mdet_run(self.meta_path, np.array(row), dvnames,objnames,connames,outnames)
             for idx, (key, data) in enumerate(result.items()): # data : metamodel output
                 item = self.output_info[idx]   # item : output_info
@@ -106,10 +113,18 @@ class DO:
                     temp.append(float(data['value'][0]))
                 elif item.get('objective_type') == '구속조건':
                     if item.get('upper_bound') is not None:
-                        G.append(float(data['value'][0]-item.get('upper_bound')))   
+                        G.append(float(data['value'][0]-item.get('upper_bound'))) 
+                        temp2.append(float(data['value'][0]-item.get('upper_bound'))) 
                     if item.get('lower_bound') is not None:
                         G.append(float(item.get('lower_bound')-data['value'][0]))
+                        temp2.append(float(item.get('lower_bound')-data['value'][0]))
             F.append(sum(temp))
+            if self.optobj is None or sum(temp)<sum(self.optobj):
+                if max(temp2) <= 0:  # Feasible 해야함 
+                    self.optobj = temp
+                    self.optcon = temp2
+
+
         self.F=np.array(F)
         self.G=np.array(G)
         
@@ -162,7 +177,7 @@ class DO:
                     
                     # 출력변수명과 best model 매핑
                     best_model_dict = {}
-                    for idx, output_name in enumerate(output_names):
+                    for idx, output_name in enumerate(outname):
                         if idx < len(best_model_values):
                             best_model_dict[output_name] = best_model_values[idx]
                     
@@ -179,6 +194,7 @@ class DO:
         moutput={}
         for idx, output in enumerate(outname):
             dir = os.path.join(address, "_metamodels", f'F{idx+1}_{best_model_dict[output]}')
+            
             for dirpath, dirnames, filenames in os.walk(dir):
                 for filename in filenames:
                     if filename.lower().endswith('.mt5'):
@@ -223,7 +239,7 @@ def meta_ParseV(metamodel_path):
                 print(f"AMR.LOG 파일 읽기 중 오류 발생: {e}")
                 return [], []
 
-        # 195줄부터 시작 (인덱스 194부터)
+       
     except Exception as e:
         
         return [], []
@@ -246,14 +262,13 @@ def meta_ParseV(metamodel_path):
     if ndv is None or vf is None:
         print("AMR.LOG 파일에서 입력 변수 개수 또는 출력 변수 개수를 찾을 수 없습니다.")
         return [], []
-
-    for ind, line in enumerate(lines):
-        pattern = r'\s*iteration:\s*(\d+)\s*/\s*train:'
-        match = re.search(pattern, line)
-        if match is not None:
-            tline=lines[ind+2].split()
-            dv_list = tline[1:ndv+1]
-            out_list = tline[ndv+1:ndv+1+vf]
+    progress_path = os.path.join(metamodel_path, 'progress.csv')
+    with open(progress_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    columns = lines[0].strip().split(',')
+    dv_list = columns[1:ndv+1]
+    out_list = columns[ndv+1:ndv+1+vf]
 
         
     return dv_list, out_list    
