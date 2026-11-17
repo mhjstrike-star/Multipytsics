@@ -179,14 +179,12 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
                  xname=xname, fname=fname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
                  TestFile=TestFile, ntest=ntest, test2train=test2train                                    # (삭제예정)
                  )
-    if amr.info!=0:
-        print(amr.info)
-        return               
+    if amr.info != 0:
+        raise RuntimeError(f"AMR initialization failed: {amr.info}")
     amr.run(comm=cm)
-    if amr.info!=0:
-        print(amr.info)
-        return         
-    return
+    if amr.info != 0:
+        raise RuntimeError(f"AMR execution failed: {amr.info}")
+
 
 def AMR_setting(dir):
     if os.path.exists(dir):
