@@ -1,6 +1,6 @@
-efficiency of mg				@dp_mgidx.txt
-efficiency of inv				@dp_mgidx.txt
-efficiency of mg+inv			@dp_mgidx.txt
+eff_mg				@dp_mgidx.txt
+eff_inv				@dp_mgidx.txt
+eff_mg+inv			@dp_mgidx.txt
 lossE of copper				@dp_mgidx.txt
 lossE of iron				@dp_mgidx.txt
 tq_max					@resp_tq_marg

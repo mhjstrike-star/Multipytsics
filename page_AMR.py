@@ -51,9 +51,12 @@ class AMRWorker(mp.Process):
         except Exception as e:
             self.log_display.appendPlainText(f"Error: {str(e)}")
 
+<<<<<<< HEAD
     def stop(self):
         if self.is_alive(): self.terminate()
 
+=======
+>>>>>>> main
 class PageAMR(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -322,13 +325,31 @@ class PageAMR(QWidget):
         self.setLayout(main_layout)
         
     def stop_running(self):
-        if hasattr(self, 'amr_worker') and self.amr_worker.is_alive():
-                self.amr_worker.stop()
-                self.log_display.appendPlainText("작업 중단 완료.")
+        worker = getattr(self, 'amr_worker', None)
+        if worker is None or worker.pid is None:
+            self.log_display.appendPlainText("중단할 AMR 프로세스가 없습니다.")
+            return
+
+        pid = worker.pid
+        try:
+            worker.terminate()
+            worker.join(timeout=3)
+        except (OSError, ValueError) as e:
+            self.log_display.appendPlainText(f"AMR 프로세스 종료 실패 (PID: {pid}): {e}")
+            return
+
+        if worker.exitcode is None:
+            self.log_display.appendPlainText(f"AMR 프로세스가 아직 종료되지 않았습니다 (PID: {pid}).")
+            return
+
+        self.log_display.appendPlainText(f"AMR 프로세스 종료 확인 (PID: {pid}, 종료 코드: {worker.exitcode}).")
+
     def on_execute(self):
         """실행 버튼 클릭 시 호출"""
         # Executing 플래그 확인
-        if self.main_window.Executing is not None:
+        if self.main_window.Executing is not None or (
+            hasattr(self, 'amr_worker') and self.amr_worker.is_alive()
+        ):
             self.log_display.appendPlainText("이미 실행 중입니다.")
             return
         
@@ -386,6 +407,7 @@ class PageAMR(QWidget):
                 what=self.main_window.ANALYSIS_TARGET,
             )
             self.amr_worker.start()
+            self.log_display.appendPlainText(f"AMR 프로세스 시작 (PID: {self.amr_worker.pid})")
         except Exception as e:
             self.log_display.appendPlainText(f"AMRWorker 실행 중 오류 발생: {str(e)}")
             
@@ -422,7 +444,9 @@ class PageAMR(QWidget):
     def on_execute2(self):
         """작업 이어하기 실행 버튼 클릭 시 호출"""
 
-        if self.main_window.Executing is not None:
+        if self.main_window.Executing is not None or (
+            hasattr(self, 'amr_worker') and self.amr_worker.is_alive()
+        ):
             self.log_display.appendPlainText("이미 실행 중입니다.")
             return
         
@@ -501,6 +525,7 @@ class PageAMR(QWidget):
             )
 
             self.amr_worker.start()
+            self.log_display.appendPlainText(f"AMR 프로세스 시작 (PID: {self.amr_worker.pid})")
         except Exception as e:
             self.log_display.appendPlainText(f"AMRWorker 실행 중 오류 발생: {str(e)}")
         
