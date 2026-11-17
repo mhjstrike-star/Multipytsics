@@ -1,10 +1,13 @@
+import re
 import os
+import math
 import asyncio
 import multiprocessing                  as mp   
 import functions.amr_functions          as amr  # AMR 관련 함수 모듈 임포트
+from pathlib                            import Path
 from PySide6.QtGui                      import QFont
-from PySide6.QtCore                     import Qt, QTimer, QThread, Signal
-from PySide6.QtWidgets                  import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QDoubleSpinBox, QPushButton, QAbstractSpinBox, QPlainTextEdit, QSplitter, QLineEdit, QFileDialog, QScrollArea
+from PySide6.QtCore                     import Qt, QTimer, QThread, Signal, QSignalBlocker
+from PySide6.QtWidgets                  import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QDoubleSpinBox, QPushButton, QAbstractSpinBox, QPlainTextEdit, QSplitter, QLineEdit, QFileDialog, QScrollArea, QComboBox, QHeaderView, QSizePolicy
 
 class AMRWorker(mp.Process):
     def __init__(self, nx, nobj, ncon, xl, xu, size_limit, accuracy_limit, cpath, opath, rpm4fl, ip, xname, yname, Unit, what,restart=False, ppath=None):
@@ -46,6 +49,175 @@ class AMRWorker(mp.Process):
             ppath=self.ppath
         )
 
+class AMRConvergenceChart(QWidget):
+    TARGET_PREFIX = 'Target value for Normalized RMSE of'
+    TARGET_ROW = re.compile(r'(\S+)\s*,\s*(\S+)')
+    ITERATION_ROW = re.compile(r'iteration:\s*(\d+)\b', re.IGNORECASE)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        from matplotlib.ticker import MaxNLocator
+        self.log_path = None
+        self.timer = QTimer(self)
+        self.timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.refresh)
+        self.output_selector = QComboBox()
+        self.output_selector.setAccessibleName('출력 변수')
+        self.output_selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.output_selector.setMinimumContentsLength(4)
+        self.output_selector.currentIndexChanged.connect(self.draw_chart)
+        header = QHBoxLayout()
+        title = QLabel('수렴 이력')
+        title.setWordWrap(True)
+        header.addWidget(title, 1)
+        header.addWidget(self.output_selector)
+        figure = Figure(facecolor='#1e1e1e', layout='constrained')
+        self.canvas = FigureCanvasQTAgg(figure)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.axes = figure.add_subplot()
+        self.iteration_locator = MaxNLocator
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(header)
+        layout.addWidget(self.canvas, 1)
+        self.reset_history()
+
+    def reset_history(self):
+        self.position = 0
+        self.file_id = None
+        self.targets = {}
+        self.history = {}
+        self.iteration = None
+        self.columns = []
+        self.reading_targets = False
+        self.final_summary = False
+        with QSignalBlocker(self.output_selector):
+            self.output_selector.clear()
+            self.output_selector.setEnabled(False)
+        self.draw_chart()
+
+    def follow_log(self, path):
+        self.timer.stop()
+        self.log_path = path
+        self.reset_history()
+        self.timer.start()
+
+    def finish(self):
+        self.timer.stop()
+        self.refresh(final=True)
+
+    def refresh(self, final=False):
+        if self.log_path is None:
+            return
+        try:
+            with self.log_path.open('rb') as log:
+                stat = os.fstat(log.fileno())
+                file_id = (stat.st_dev, stat.st_ino)
+                if self.file_id is not None and (self.file_id != file_id or stat.st_size < self.position):
+                    self.reset_history()
+                self.file_id = file_id
+                if stat.st_size <= self.position or self.final_summary:
+                    return
+                log.seek(self.position)
+                changed = False
+                # Read only data present when this poll started.
+                data = log.read(stat.st_size - self.position)
+                if not final:
+                    data = data[:data.rfind(b'\n') + 1]
+                for line in data.splitlines():
+                    changed |= self.parse_line(line.decode('utf-8', errors='replace').strip())
+                    if self.final_summary:
+                        break
+                self.position += len(data)
+        except OSError: # The engine may not have created the file yet or may hold a write lock.
+            return
+
+        if changed:
+            names = dict.fromkeys((*self.targets, *self.history))
+            with QSignalBlocker(self.output_selector):
+                for name in names:
+                    if self.output_selector.findText(name) == -1:
+                        self.output_selector.addItem(name)
+                self.output_selector.setEnabled(self.output_selector.count() > 0)
+            self.draw_chart()
+
+    def parse_line(self, line):
+        if line.startswith('Results of Final Metamodels'):
+            self.final_summary = True
+            return False
+        if line.startswith(self.TARGET_PREFIX):
+            self.reading_targets = True
+            line = line[len(self.TARGET_PREFIX):].strip()
+        if self.reading_targets:
+            target = self.TARGET_ROW.fullmatch(line)
+            if target:
+                name, value = target.groups()
+                percent = self.error_percent(value)
+                if percent is not None and self.targets.get(name) != percent:
+                    self.targets[name] = percent
+                    return True
+                return False
+            self.reading_targets = False
+
+        step = self.ITERATION_ROW.match(line)
+        if step:
+            self.iteration = int(step[1]) + 1
+            self.columns = []
+        elif self.iteration is not None and line.startswith('convergence_info'):
+            self.columns = line.split()[1:]
+        elif self.columns and line.startswith('best accuracy'):
+            values = line.split()[2:]
+            changed = False
+            if len(values) == len(self.columns):
+                for name, value in zip(self.columns, values):
+                    percent = self.error_percent(value)
+                    if percent is not None:
+                        points = self.history.setdefault(name, {})
+                        if points.get(self.iteration) != percent:
+                            points[self.iteration] = percent
+                            changed = True
+            self.columns = []
+            return changed
+        return False
+
+    @staticmethod
+    def error_percent(value):
+        try:
+            percent = float(value) * 100
+        except ValueError:
+            return None
+        return percent if math.isfinite(percent) and percent >= 0 else None
+
+    def draw_chart(self):
+        axes = self.axes
+        axes.clear()
+        axes.set_facecolor('#1b1c34')
+        axes.tick_params(colors='#e0e0e0', labelsize=9)
+        for spine in axes.spines.values():
+            spine.set_color('#555671')
+        axes.set_xlabel('Iteration', color='#e0e0e0')
+        axes.set_ylabel('Error (%)', color='#e0e0e0')
+        name = self.output_selector.currentText()
+        points = sorted(self.history.get(name, {}).items())
+        if points:
+            iterations, errors = zip(*points)
+            target = self.targets.get(name)
+            if target is not None:
+                axes.plot(iterations, [target] * len(iterations), color='#ff9094', marker='o', markersize=4, label='Target Error')
+            axes.plot(iterations, errors, color='#22e1ee', marker='s', markersize=4, label='Current Error')
+            axes.annotate(f'{errors[-1]:.3g}', (iterations[-1], errors[-1]), xytext=(-3, 7), textcoords='offset points', ha='right', color='#e0e0e0', fontsize=9)
+            axes.margins(x=0.07, y=0.22)
+            axes.xaxis.set_major_locator(self.iteration_locator(integer=True, min_n_ticks=1))
+            axes.grid(axis='y', color='#555671', alpha=0.35)
+            axes.legend(loc='upper center', bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False, labelcolor='#e0e0e0', fontsize=9)
+        else:
+            axes.set_xticks([])
+            axes.set_yticks([])
+            axes.text(0.5, 0.5, 'Waiting for data', transform=axes.transAxes, ha='center', va='center', color='#b0b0c0')
+        self.canvas.draw_idle()
+
 
 class PageAMR(QWidget):
     def __init__(self, main_window):
@@ -74,10 +246,10 @@ class PageAMR(QWidget):
         title.setFixedHeight(40)
         main_layout.addWidget(title)
         
-        # ============= 좌측 50% + 우측 50% 스플리터 시작 =============
+        # 좌측 입력 영역과 우측 그래프·로그 영역
         splitter = QSplitter(Qt.Horizontal)
         
-        # ===== 좌측 50%: 설계변수 + 출력변수 =====
+        # 좌측: 설계변수와 출력변수
         left_widget = QWidget()
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -128,6 +300,7 @@ class PageAMR(QWidget):
                 font-weight: bold;
                 font-size: 11px;
             }""")
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         left_layout.addWidget(self.table, 1)
         
         # 출력 변수 레이블
@@ -166,6 +339,7 @@ class PageAMR(QWidget):
                 font-weight: bold;
                 font-size: 11px;
             }""")
+        self.output_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         left_layout.addWidget(self.output_table, 1)
         
         # 파라미터 입력 섹션
@@ -183,7 +357,6 @@ class PageAMR(QWidget):
         
         # 최대 실험점 개수
         max_exp_label = QLabel('최대 실험점 개수:')
-        max_exp_label.setMinimumWidth(120)
         self.max_exp_spinbox = QDoubleSpinBox()
         self.max_exp_spinbox.setMinimum(1)
         self.max_exp_spinbox.setMaximum(10000)
@@ -191,13 +364,12 @@ class PageAMR(QWidget):
         self.max_exp_spinbox.setDecimals(0)
         self.max_exp_spinbox.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.max_exp_spinbox.setMinimumHeight(30)
-        self.max_exp_spinbox.setMinimumWidth(80)
+        self.max_exp_spinbox.setFixedWidth(64)
         params_layout.addWidget(max_exp_label)
         params_layout.addWidget(self.max_exp_spinbox)
         
         # 수렴 종료 조건
         convergence_label = QLabel('수렴 종료:')
-        convergence_label.setMinimumWidth(70)
         self.convergence_spinbox = QDoubleSpinBox()
         self.convergence_spinbox.setMinimum(1)
         self.convergence_spinbox.setMaximum(1000)
@@ -205,7 +377,7 @@ class PageAMR(QWidget):
         self.convergence_spinbox.setDecimals(0)
         self.convergence_spinbox.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.convergence_spinbox.setMinimumHeight(30)
-        self.convergence_spinbox.setMinimumWidth(80)
+        self.convergence_spinbox.setFixedWidth(64)
         params_layout.addWidget(convergence_label)
         params_layout.addWidget(self.convergence_spinbox)
         params_layout.addStretch()
@@ -257,24 +429,23 @@ class PageAMR(QWidget):
         left_layout.addLayout(continue_layout)
         left_layout.addStretch()
         left_widget.setLayout(left_layout)
-        left_widget.setMinimumWidth(0)  # 최소 너비 제거로 스플리터 비율 조절 가능
         scroll_area = QScrollArea()
         scroll_area.setWidget(left_widget)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumWidth(0)  # 최소 너비 제거
         scroll_area.setStyleSheet("""
             QScrollArea {
                 background-color: #1e1e1e;
                 border: none;
             }""")
+        scroll_area.setMinimumWidth(left_widget.minimumSizeHint().width() + scroll_area.verticalScrollBar().sizeHint().width())
         splitter.addWidget(scroll_area)
         
-        # ===== 우측: 빈 영역 + 실행 로그 =====
+        # ===== 우측: 수렴 이력 + 실행 로그 =====
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(5)
-        self.visualization_area = QWidget()
+        self.visualization_area = AMRConvergenceChart(right_widget)
         right_layout.addWidget(self.visualization_area, 2)
         log_widget = QWidget()
         log_layout = QVBoxLayout(log_widget)
@@ -301,8 +472,7 @@ class PageAMR(QWidget):
                 font-size: 13px;
                 padding: 5px;
                 border: 1px solid #404040;
-            }
-        """)
+            }""")
         log_layout.addWidget(self.log_display, 1)
         right_layout.addWidget(log_widget, 1)
         splitter.addWidget(right_widget)
@@ -310,9 +480,8 @@ class PageAMR(QWidget):
         # 스플리터 설정
         splitter.setCollapsible(0, False)  # 좌측 접기 불가
         splitter.setCollapsible(1, False)  # 우측 접기 불가
-        splitter.setSizes([65, 35])  # 비율 설정
+        splitter.setSizes([700, 300])
         main_layout.addWidget(splitter, 1)
-        
         self.setLayout(main_layout)
         
     def stop_running(self):
@@ -320,7 +489,6 @@ class PageAMR(QWidget):
         if worker is None or not worker.is_alive():
             self.log_display.appendPlainText("중단할 AMR 프로세스가 없습니다.")
             return
-
         pid = worker.pid
         try:
             worker.terminate()
@@ -328,37 +496,30 @@ class PageAMR(QWidget):
         except (OSError, ValueError) as e:
             self.log_display.appendPlainText(f"AMR 프로세스 종료 실패 (PID: {pid}): {e}")
             return
-
         if worker.exitcode is None:
             self.log_display.appendPlainText(f"AMR 프로세스가 아직 종료되지 않았습니다 (PID: {pid}).")
             return
-
         self.update_log()
         self.log_timer.stop()
+        self.visualization_area.finish()
         self.log_display.appendPlainText(f"AMR 프로세스 종료 확인 (PID: {pid}, 종료 코드: {worker.exitcode}).")
 
-    def on_execute(self):
-        """실행 버튼 클릭 시 호출"""
+    def on_execute(self): # 실행 버튼 클릭 시 호출
         # Executing 플래그 확인
-        if self.main_window.Executing is not None or (
-            hasattr(self, 'amr_worker') and self.amr_worker.is_alive()
-        ):
+        if self.main_window.Executing is not None or (hasattr(self, 'amr_worker') and self.amr_worker.is_alive()):
             self.log_display.appendPlainText("이미 실행 중입니다.")
             return
-        
         # Executing 상태 설정
         self.main_window.Executing = True
         try:
             amr.AMR_setting(self.main_window.WDIR)   # Task 폴더 초기화 작업 진행
-            # 이전 타이머 멈추기 (파일 handle이 해제되도록)
-            if self.log_timer.isActive():
+            if self.log_timer.isActive(): # 이전 타이머 멈추기 (파일 handle이 해제되도록)
                 self.log_timer.stop()
 
             log_file_path = os.path.join(self.main_window.WDIR, 'amrfunction.log')
             self.log_file_path = log_file_path
             self.log_position = 0  # 로그 위치 초기화
             self.log_display.clear()  # 로그 디스플레이 초기화
-
             max_exp = self.max_exp_spinbox.value()
             nx = len(self.main_window.DV)      # 선택된 설계 변수 개수
             nobj = 1
@@ -371,12 +532,8 @@ class PageAMR(QWidget):
             size_limit = int(max_exp)  # 최대 실험점 개수
             accuracy_limit =  [ov.get('TARGET_ERROR', 0)*0.01 for ov in self.main_window.OV]
             cpath=os.path.join(os.path.dirname(self.main_window.WDIR), 'task/AMR_Result')  # AMR 결과 저장 경로
-            amr_logfile = os.path.join(cpath, 'AMR.LOG')
-            if os.path.exists(amr_logfile):
-                try:
-                    os.remove(amr_logfile)
-                except OSError as e:
-                    pass
+            amr_logfile = Path(cpath) / 'AMR.LOG'
+            amr_logfile.unlink(missing_ok=True)
 
             self.amr_worker = AMRWorker(
                 nx=nx, nobj=nobj, ncon=ncon,
@@ -390,9 +547,9 @@ class PageAMR(QWidget):
                 xname=xname,
                 yname=yname,
                 Unit=unit,
-                what=self.main_window.ANALYSIS_TARGET,
-            )
+                what=self.main_window.ANALYSIS_TARGET,)
             self.amr_worker.start()
+            self.visualization_area.follow_log(amr_logfile)
             self.log_timer.start(1000)
             self.log_display.appendPlainText(f"AMR 프로세스 시작 (PID: {self.amr_worker.pid})")
         except Exception as e:
@@ -400,7 +557,6 @@ class PageAMR(QWidget):
         finally:
             self.main_window.Executing = None
     
-
     def check_worker_exit(self):
         worker = self.amr_worker
         exitcode = worker.exitcode
@@ -408,34 +564,21 @@ class PageAMR(QWidget):
             return
 
         self.log_timer.stop()
+        self.visualization_area.finish()
         if exitcode == 0:
             self.log_display.appendPlainText("========== 실행 완료 ==========")
         else:
             self.log_display.appendPlainText(f"AMR 실행 실패 (PID: {worker.pid}, 종료 코드: {exitcode}).")
 
-    def on_browse_file(self):
-        """파일 탐색 버튼 클릭 시 호출"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            '분석 결과 파일 선택',
-            self.main_window.WDIR,
-            'CSV Files (*.csv);;All Files (*)'
-        )
+    def on_browse_file(self): # 파일 탐색 버튼 클릭 시 호출
+        file_path, _ = QFileDialog.getOpenFileName(self, '분석 결과 파일 선택', self.main_window.WDIR, 'CSV Files (*.csv);;All Files (*)')
         if file_path:
             self.info_path.setText(file_path)
-    
 
-
-    
-    def on_execute2(self):
-        """작업 이어하기 실행 버튼 클릭 시 호출"""
-
-        if self.main_window.Executing is not None or (
-            hasattr(self, 'amr_worker') and self.amr_worker.is_alive()
-        ):
+    def on_execute2(self): # 작업 이어하기 실행 버튼 클릭 시 호출
+        if self.main_window.Executing is not None or (hasattr(self, 'amr_worker') and self.amr_worker.is_alive()):
             self.log_display.appendPlainText("이미 실행 중입니다.")
             return
-        
         info_path = self.info_path.text().strip()
         if not info_path:
             self.log_display.appendPlainText("오류: 이어하기 CSV 파일을 선택해주세요.")
@@ -445,16 +588,13 @@ class PageAMR(QWidget):
             return
 
         self.main_window.Executing = True
-        try:
-            # 이전 타이머 멈추기 (파일 handle이 해제되도록)
+        try: # 이전 타이머 멈추기 (파일 handle이 해제되도록)
             if self.log_timer.isActive():
                 self.log_timer.stop()
-
             log_file_path = os.path.join(self.main_window.WDIR, 'amrfunction.log')
             self.log_file_path = log_file_path
             self.log_position = 0  # 로그 위치 초기화
             self.log_display.clear()  # 로그 디스플레이 초기화
-
             max_exp = self.max_exp_spinbox.value()
             nx = len(self.main_window.DV)      # 선택된 설계 변수 개수
             nobj = 1
@@ -467,7 +607,6 @@ class PageAMR(QWidget):
             size_limit = int(max_exp)  # 최대 실험점 개수
             accuracy_limit =  [ov.get('TARGET_ERROR', 0)*0.01 for ov in self.main_window.OV]
             cpath=os.path.join(os.path.dirname(self.main_window.WDIR), 'task/AMR_Result')  # AMR 결과 저장 경로
-
             count_file = os.path.join(self.main_window.WDIR, 'runcount.txt')
             wdir_path = os.path.join(self.main_window.WDIR, 'wdir')
             if os.path.exists(wdir_path):
@@ -484,26 +623,20 @@ class PageAMR(QWidget):
 
             print(f"저장된 분석 파일에서 작업을 이어합니다: {info_path}")
             print(f"info_path = {info_path}")
-
             convergence_file = os.path.join(cpath, 'convergence_info.bin')
-            amr_logfile = os.path.join(cpath, 'AMR.LOG')
+            amr_logfile = Path(cpath) / 'AMR.LOG'
             if os.path.exists(convergence_file):
                 try:
                     os.remove(convergence_file)
                 except OSError as e:
                     pass
-            if os.path.exists(amr_logfile):
-                try:
-                    os.remove(amr_logfile)
-                except OSError as e:
-                    pass
-
+            amr_logfile.unlink(missing_ok=True)
             self.amr_worker = AMRWorker(nx=nx, nobj=nobj, ncon=ncon,xl= xl,xu= xu, size_limit=size_limit,
                         accuracy_limit= accuracy_limit,cpath=cpath,opath=self.main_window.WDIR,rpm4fl=self.main_window.rpm4fl,
                         ip=self.main_window.IP_ADDRESS,xname=xname,yname=yname,Unit=unit, what=self.main_window.ANALYSIS_TARGET,restart=True, ppath=info_path
             )
-
             self.amr_worker.start()
+            self.visualization_area.follow_log(amr_logfile)
             self.log_timer.start(1000)
             self.log_display.appendPlainText(f"AMR 프로세스 시작 (PID: {self.amr_worker.pid})")
         except Exception as e:
@@ -511,77 +644,47 @@ class PageAMR(QWidget):
         finally:
             self.main_window.Executing = None
         
-        
-    def update_log(self):
-        """1초마다 로그 파일을 읽고 업데이트"""
+
+    def update_log(self): # 1초마다 로그 파일을 읽고 업데이트
         if not self.log_file_path or not os.path.exists(self.log_file_path):
             return
-        
         try:
-            with open(self.log_file_path, 'r', encoding='utf-8') as f:
-                # 마지막으로 읽은 위치에서 시작
+            with open(self.log_file_path, 'r', encoding='utf-8') as f: # 마지막으로 읽은 위치에서 시작
                 f.seek(self.log_position)
                 new_content = f.read()
-                
                 if new_content:
-                    # 새로운 로그 내용을 디스플레이에 추가
-                    self.log_display.appendPlainText(new_content.rstrip())
-                    
-                    # 현재 파일 위치 저장
-                    self.log_position = f.tell()
-                    
-                    # 자동 스크롤: 항상 마지막 줄이 보이도록
-                    self.log_display.verticalScrollBar().setValue(
-                        self.log_display.verticalScrollBar().maximum()
-                    )
+                    self.log_display.appendPlainText(new_content.rstrip()) # 새로운 로그 내용을 디스플레이에 추가
+                    self.log_position = f.tell() # 현재 파일 위치 저장
+                    self.log_display.verticalScrollBar().setValue(self.log_display.verticalScrollBar().maximum()) # 자동 스크롤: 항상 마지막 줄이 보이도록
         except Exception as e:
             print(f"로그 파일 읽기 오류: {e}")
     
-    def refresh_table(self):
-        """Main page에서 호출: DV와 OV 데이터로 테이블 업데이트"""
-        # 설계 변수 테이블 업데이트
-        if self.main_window.DV:
+    def refresh_table(self): # Main page에서 호출: DV와 OV 데이터로 테이블 업데이트
+        if self.main_window.DV: # 설계 변수 테이블 업데이트
             self.table.setRowCount(len(self.main_window.DV))
-            
             for i, item in enumerate(self.main_window.DV):
-                # 행 높이 설정
                 self.table.setRowHeight(i, 35)
-                
                 name = item.get('NAME', '')
                 unit = item.get('UNIT', '')
                 lv = item.get('LV', 0)  # 하한값
                 uv = item.get('UV', 0)  # 상한값
-                
-                # 0열: 설계변수 (NAME)
-                self.table.setItem(i, 0, QTableWidgetItem(name))
-                # 1열: 하한값 (LV)
-                self.table.setItem(i, 1, QTableWidgetItem(f'{lv:.3f}'))
-                # 2열: 상한값 (UV)
-                self.table.setItem(i, 2, QTableWidgetItem(f'{uv:.3f}'))
-                # 3열: 단위 (UNIT)
-                self.table.setItem(i, 3, QTableWidgetItem(unit))
+                self.table.setItem(i, 0, QTableWidgetItem(name)) # 0열: 설계변수 (NAME)
+                self.table.setItem(i, 1, QTableWidgetItem(f'{lv:.3f}')) # 1열: 하한값 (LV)
+                self.table.setItem(i, 2, QTableWidgetItem(f'{uv:.3f}')) # 2열: 상한값 (UV)
+                self.table.setItem(i, 3, QTableWidgetItem(unit)) # 3열: 단위 (UNIT)
         else:
-            # DV가 비어있으면 테이블 초기화
-            self.table.setRowCount(0)
+            self.table.setRowCount(0) # DV가 비어있으면 테이블 초기화
         
-        # 출력 변수 테이블 업데이트
-        if self.main_window.OV:
+        
+        if self.main_window.OV: # 출력 변수 테이블 업데이트
             self.output_table.setRowCount(len(self.main_window.OV))
-            
             for i, item in enumerate(self.main_window.OV):
-                # 행 높이 설정
                 self.output_table.setRowHeight(i, 35)
-                
                 name = item.get('NAME', '')
                 target_error = item.get('TARGET_ERROR', '')
-                
-                # 0열: 출력변수 (NAME)
-                self.output_table.setItem(i, 0, QTableWidgetItem(name))
-                # 1열: 목표 오차율 (정수/실수를 문자열로 변환)
-                self.output_table.setItem(i, 1, QTableWidgetItem(str(target_error)))
-                # 2열: 생성여부 (콤보박스 - 읽기 전용으로 표시)
+                self.output_table.setItem(i, 0, QTableWidgetItem(name)) # 0열: 출력변수 (NAME)
+                self.output_table.setItem(i, 1, QTableWidgetItem(str(target_error))) # 1열: 목표 오차율 (정수/실수를 문자열로 변환) ### 2열: 생성여부 (콤보박스 - 읽기 전용으로 표시)
                 label = QLabel('선택됨')
                 self.output_table.setCellWidget(i, 2, label)
         else:
-            # OV가 비어있으면 테이블 초기화
-            self.output_table.setRowCount(0)
+            self.output_table.setRowCount(0) # OV가 비어있으면 테이블 초기화

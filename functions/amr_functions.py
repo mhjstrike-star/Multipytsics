@@ -176,7 +176,7 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
                  accuracy_limit=accuracy_limit, abs_avg_limit=abs_avg_limit, rel_avg_limit=rel_avg_limit, # 수렴조건 관련 파라미터1 
                  size_limit=size_limit, no_imp_count=no_imp_count, itrmop=itrmop,                         # 수렴조건 관련 파라미터2
                  process_outliers=process_outliers, ep=ep,  scaling_option = scaling_option,              # Outliers, Scaling 관련 파라미터
-                 xname=xname, fname=fname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
+                 xname=xname, fname=yname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
                  TestFile=TestFile, ntest=ntest, test2train=test2train                                    # (삭제예정)
                  )
     if amr.info != 0:
