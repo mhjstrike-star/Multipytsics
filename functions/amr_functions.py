@@ -5,19 +5,12 @@ import platform
 import asyncio
 import logging
 import shutil
-try:
-    from . import run_analysis
+try: from . import run_analysis
 except ImportError:
-    try:
-        import run_analysis
-    except ImportError:
-        run_analysis = None
-# 조건부 import: 패키지 내에서는 상대경로, 직접 실행시는 절대경로
-try:
-    from .solve import solving  # Main.py에서 import될 때
-except ImportError:
-    from solve import solving   # 이 파일을 직접 실행할 때
-
+    try: import run_analysis
+    except ImportError: run_analysis = None
+try: from .solve import solving  # Main.py에서 import될 때
+except ImportError: from solve import solving   # 이 파일을 직접 실행할 때
 from AMR import *
 
 class communicator(object):
@@ -36,7 +29,7 @@ class communicator(object):
         # 로깅 설정
         log_file = os.path.join(opath, 'amrfunction.log')
         if os.path.exists(log_file):  # 로그파일 초기화
-                    os.remove(log_file)
+            os.remove(log_file)
         self.logger = logging.getLogger(f'communicator_{id(self)}')
         self.logger.setLevel(logging.INFO)
         
@@ -66,39 +59,22 @@ class communicator(object):
         self.logger.info('Logger initialized successfully')
 
     def Analysis(self, x, f):
-
-        # '''PIAnO의 analysis tasks를 사용하여 x(1차원)에서의 함수값을 계산한 후
-        #     f에 저장한다.
-        # '''
         try:
-            
-            
             npt = int(len(x)/self.nx) # Sampling 결과 32케이스 32x1 list  npt = 32/4(설계변수 개수)
             f = np.reshape(f, (npt,self.nf))    # Sampling 결과 32케이스 32x1 list -> 출력변수가 1개면 8x1     
             x = np.reshape(x, (npt,self.nx))    # 설계 변수 4개인 경우 8x4 2d np array  
-            
-            
-            
-            # 비동기 함수 실행: asyncio.run()으로 동기 메서드에서 비동기 함수 호출
             test=solving()
             asyncio.run(test.main(x=x, f=f, opath=self.opath, rpm4fl=float(self.rpm4fl),ip=self.ip, DVname=self.DVname, Yname=self.Yname, Unit=self.Unit,what=self.what,gen=self.generation))
             self.generation += 1   # 세대수 증가
             self.logger.info('Solving 완료')
-            
             self.f = f.flatten()
             self.logger.info('Analysis 완료')
-            
         except Exception as e:
             self.logger.error(f'Analysis 중 오류 발생: {e}', exc_info=True)
             print(f"Error during Analysis: {e}")
             return
 
-    def Export(self, datainfo, modelinfo):
-        '''각 단계의
-            1) plot 작성을 위한 데이터(npt, bestype, bestrmse)를 받는다.
-            2) 메타모델 생성을 위해 사용한 xtrain, ftrain, xtest, ftest를 받는다.
-            3) 메타모델 정보를 받는다. 
-        '''        
+    def Export(self, datainfo, modelinfo):  
         nx, nf, npt, xtrain, ftrain, xtest, ftest = datainfo[0], datainfo[1], datainfo[2], datainfo[3], datainfo[4], datainfo[5], datainfo[6]
         return    
     
@@ -106,10 +82,8 @@ class communicator(object):
         print('test')
 
 def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xname,yname,Unit, what,restart=False,ppath=None):
-
     global icnt
     icnt=0
-
     # Check PC spec. 
     print('OS                   :\t', platform.system())    
     print('OS Version           :\t', platform.version())
@@ -118,7 +92,6 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
     print('cpu count            :\t', os.cpu_count())        
     #exit()
 
-    
     ## 사용자 지정 파라미터 정의 ------------------------------------------------------------------------
     ## WorkingDir. 정의
     #cpath='./output_submain'    
@@ -203,29 +176,17 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
                  accuracy_limit=accuracy_limit, abs_avg_limit=abs_avg_limit, rel_avg_limit=rel_avg_limit, # 수렴조건 관련 파라미터1 
                  size_limit=size_limit, no_imp_count=no_imp_count, itrmop=itrmop,                         # 수렴조건 관련 파라미터2
                  process_outliers=process_outliers, ep=ep,  scaling_option = scaling_option,              # Outliers, Scaling 관련 파라미터
-                 xname=xname, fname=fname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
+                 xname=xname, fname=yname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
                  TestFile=TestFile, ntest=ntest, test2train=test2train                                    # (삭제예정)
                  )
-    if amr.info!=0:
-        print(amr.info)
-        return               
-    
+    if amr.info != 0:
+        raise RuntimeError(f"AMR initialization failed: {amr.info}")
     amr.run(comm=cm)
-   
-    if amr.info!=0:
-        print(amr.info)
-        return
-    ## AMR 실행 ===========================================#              
+    if amr.info != 0:
+        raise RuntimeError(f"AMR execution failed: {amr.info}")
 
-    return
 
 def AMR_setting(dir):
-    """
-    해석 폴더 전달 후 Parallel 환경 구축을 위한 폴더 생성 및 파일 복사를 수행
-    """
-
-    
-    # task_dir이 존재하면, AMR_Result만 남기고 나머지는 삭제
     if os.path.exists(dir):
         for item in os.listdir(dir):
             item_path = os.path.join(dir, item)
@@ -238,13 +199,11 @@ def AMR_setting(dir):
     else:
         os.makedirs(dir, exist_ok=True)
     
-
 if __name__ == '__main__':
     dir_ip          = 'D:\\python_dir\\_ANSYS_AUTOCAL\\ipdata_lss'
     supercom_input  = {'10.98.40.101':{'cnt':3,'loc':'pj'}, '10.14.84.229':{'cnt':1,'loc':'gj'}}
     rpm4FL          = 100
     what            = 'all'
-    
     # Test data - 2D matrix and variables
     import numpy as np
     test_matrix = np.array([
@@ -253,7 +212,6 @@ if __name__ == '__main__':
         [9.2, 10.5, 11.1, 12.6],
         [13.4, 14.8, 15.2, 16.9]
     ])
-    
     test_opath = ['D:\\work\\2025_현대multi-physics\\SW\\task']
     test_rpm4fl = 1500
     test_ip = ['10.98.40.101','10.98.40.102','10.98.40.103','10.98.40.104']
@@ -270,7 +228,4 @@ if __name__ == '__main__':
     test = solving()
     cm=communicator(test_x,test_f,opath=test_opath,rpm4fl=test_rpm4fl,ip=test_ip,DVname=test_dvname,Unit=test_unit, what=what)
     cm.Analysis(test_x, test_f)
-    asyncio.run(test.main(x=test_x, f=test_f, opath=test_opath, rpm4fl=test_rpm4fl, 
-                                        ip=test_ip, DVname=test_dvname, Unit=test_unit,what=what))
-    
-   
+    asyncio.run(test.main(x=test_x, f=test_f, opath=test_opath, rpm4fl=test_rpm4fl, ip=test_ip, DVname=test_dvname, Unit=test_unit,what=what))
