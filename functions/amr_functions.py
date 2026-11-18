@@ -1,10 +1,13 @@
-import numpy as np
+import re
 import os
-from os import sys
-import platform
+import shutil
 import asyncio
 import logging
-import shutil
+import platform
+import numpy            as np
+from os                 import sys
+from pathlib            import Path
+from tempfile           import TemporaryDirectory
 try: from . import run_analysis
 except ImportError:
     try: import run_analysis
@@ -80,6 +83,40 @@ class communicator(object):
     
     def HMC(self):
         print('test')
+
+def export_final_metamodels(result_dir: Path, output_count: int) -> Path:
+    log = (result_dir / 'AMR.LOG').read_text(encoding='utf-8-sig', errors='replace')
+    _, summary_header, summary = log.rpartition('Results of Final Metamodels')
+    selection = re.search(r'^[ \t]*BEST MODEL[ \t]+([^\r\n]+)', summary, re.MULTILINE)
+    if not summary_header or selection is None:
+        raise RuntimeError('AMR.LOG is missing its final metamodel selection')
+
+    model_types = selection.group(1).split()
+    if len(model_types) != output_count or any(re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', name) is None for name in model_types):
+        raise RuntimeError(f'Invalid final metamodel selection: {model_types}')
+    destination = result_dir / 'bestmodels'
+    with TemporaryDirectory(prefix='.bestmodels-', dir=result_dir) as temp_dir:
+        staging_dir = Path(temp_dir) / 'new'
+        previous_dir = Path(f'{temp_dir}-previous')
+        for index, model_type in enumerate(model_types, start=1):
+            model_dir = f'F{index}_{model_type}'
+            source = result_dir / '_metamodels' / model_dir / 'IMM.MT5'
+            if not source.is_file() or source.stat().st_size == 0:
+                raise RuntimeError(f'Final AMR metamodel file is missing or empty: {source}')
+            output = staging_dir / model_dir / source.name
+            output.parent.mkdir(parents=True)
+            shutil.copyfile(source, output)
+        if destination.exists():
+            destination.rename(previous_dir)
+        try:
+            staging_dir.rename(destination)
+        except OSError:
+            if previous_dir.exists():
+                previous_dir.rename(destination)
+            raise
+        if previous_dir.exists():
+            shutil.rmtree(previous_dir)
+    return destination
 
 def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xname,yname,Unit, what,restart=False,ppath=None):
     global icnt
@@ -184,6 +221,8 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
     amr.run(comm=cm)
     if amr.info != 0:
         raise RuntimeError(f"AMR execution failed: {amr.info}")
+    model_dir = export_final_metamodels(Path(cpath), nf)
+    cm.logger.info('Final AMR metamodels saved to %s', model_dir)
 
 
 def AMR_setting(dir):
