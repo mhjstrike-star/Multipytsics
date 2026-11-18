@@ -51,7 +51,7 @@ class AMRWorker(mp.Process):
 
 class AMRConvergenceChart(QWidget):
     TARGET_PREFIX = 'Target value for Normalized RMSE of'
-    TARGET_ROW = re.compile(r'(\S+)\s*,\s*(\S+)')
+    TARGET_ROW = re.compile(r'(.+?)\s*,\s*(\S+)')
     ITERATION_ROW = re.compile(r'iteration:\s*(\d+)\b', re.IGNORECASE)
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,6 +59,7 @@ class AMRConvergenceChart(QWidget):
         from matplotlib.figure import Figure
         from matplotlib.ticker import MaxNLocator
         self.log_path = None
+        self.output_names = ()
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.setInterval(100)
@@ -70,7 +71,11 @@ class AMRConvergenceChart(QWidget):
         self.output_selector.currentIndexChanged.connect(self.draw_chart)
         header = QHBoxLayout()
         title = QLabel('수렴 이력')
-        title.setWordWrap(True)
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setFixedHeight(30)
         header.addWidget(title, 1)
         header.addWidget(self.output_selector)
         figure = Figure(facecolor='#1e1e1e', layout='constrained')
@@ -80,6 +85,7 @@ class AMRConvergenceChart(QWidget):
         self.iteration_locator = MaxNLocator
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
         layout.addLayout(header)
         layout.addWidget(self.canvas, 1)
         self.reset_history()
@@ -90,17 +96,19 @@ class AMRConvergenceChart(QWidget):
         self.targets = {}
         self.history = {}
         self.iteration = None
-        self.columns = []
+        self.column_header = ''
         self.reading_targets = False
+        self.target_rows = []
         self.final_summary = False
         with QSignalBlocker(self.output_selector):
             self.output_selector.clear()
             self.output_selector.setEnabled(False)
         self.draw_chart()
 
-    def follow_log(self, path):
+    def follow_log(self, path, output_names):
         self.timer.stop()
         self.log_path = path
+        self.output_names = tuple(output_names)
         self.reset_history()
         self.timer.start()
 
@@ -140,47 +148,59 @@ class AMRConvergenceChart(QWidget):
                 for name in names:
                     if self.output_selector.findText(name) == -1:
                         self.output_selector.addItem(name)
+                        index = self.output_selector.count() - 1
+                        self.output_selector.setItemData(index, name, Qt.ItemDataRole.ToolTipRole)
                 self.output_selector.setEnabled(self.output_selector.count() > 0)
             self.draw_chart()
 
+    def display_names(self, log_names):
+        # The engine writes results in the same order as its fname argument.
+        if len(log_names) == len(self.output_names):
+            return self.output_names
+        return log_names
+
     def parse_line(self, line):
-        if line.startswith('Results of Final Metamodels'):
-            self.final_summary = True
-            return False
         if line.startswith(self.TARGET_PREFIX):
             self.reading_targets = True
+            self.target_rows = []
             line = line[len(self.TARGET_PREFIX):].strip()
+        changed = False
         if self.reading_targets:
             target = self.TARGET_ROW.fullmatch(line)
             if target:
                 name, value = target.groups()
-                percent = self.error_percent(value)
-                if percent is not None and self.targets.get(name) != percent:
-                    self.targets[name] = percent
-                    return True
+                self.target_rows.append((name.strip(), self.error_percent(value)))
                 return False
-            self.reading_targets = False
 
+            self.reading_targets = False
+            names = self.display_names([name for name, _ in self.target_rows])
+            targets = {name: percent for name, (_, percent) in zip(names, self.target_rows) if percent is not None}
+            changed = targets != self.targets
+            self.targets = targets
+        if line.startswith('Results of Final Metamodels'):
+            self.final_summary = True
+            return changed
         step = self.ITERATION_ROW.match(line)
         if step:
             self.iteration = int(step[1]) + 1
-            self.columns = []
+            self.column_header = ''
         elif self.iteration is not None and line.startswith('convergence_info'):
-            self.columns = line.split()[1:]
-        elif self.columns and line.startswith('best accuracy'):
+            self.column_header = line.removeprefix('convergence_info').strip()
+        elif self.column_header and line.startswith('best accuracy'):
             values = line.split()[2:]
-            changed = False
-            if len(values) == len(self.columns):
-                for name, value in zip(self.columns, values):
+            log_names = re.split(r'\s{2,}|\t+', self.column_header)
+            if len(log_names) != len(values):
+                log_names = self.column_header.split()
+            self.column_header = ''
+            if len(log_names) == len(values):
+                for name, value in zip(self.display_names(log_names), values):
                     percent = self.error_percent(value)
                     if percent is not None:
                         points = self.history.setdefault(name, {})
                         if points.get(self.iteration) != percent:
                             points[self.iteration] = percent
                             changed = True
-            self.columns = []
-            return changed
-        return False
+        return changed
 
     @staticmethod
     def error_percent(value):
@@ -200,6 +220,7 @@ class AMRConvergenceChart(QWidget):
         axes.set_xlabel('Iteration', color='#e0e0e0')
         axes.set_ylabel('Error (%)', color='#e0e0e0')
         name = self.output_selector.currentText()
+        self.output_selector.setToolTip(name)
         points = sorted(self.history.get(name, {}).items())
         if points:
             iterations, errors = zip(*points)
@@ -207,11 +228,21 @@ class AMRConvergenceChart(QWidget):
             if target is not None:
                 axes.plot(iterations, [target] * len(iterations), color='#ff9094', marker='o', markersize=4, label='Target Error')
             axes.plot(iterations, errors, color='#22e1ee', marker='s', markersize=4, label='Current Error')
-            axes.annotate(f'{errors[-1]:.3g}', (iterations[-1], errors[-1]), xytext=(-3, 7), textcoords='offset points', ha='right', color='#e0e0e0', fontsize=9)
+            for iteration, error in points:
+                axes.annotate(
+                    f'{error:.3g}', (iteration, error),
+                    xytext=(0, 7), textcoords='offset points', ha='center',
+                    color='#e0e0e0', fontsize=9,
+                )
             axes.margins(x=0.07, y=0.22)
             axes.xaxis.set_major_locator(self.iteration_locator(integer=True, min_n_ticks=1))
             axes.grid(axis='y', color='#555671', alpha=0.35)
-            axes.legend(loc='upper center', bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False, labelcolor='#e0e0e0', fontsize=9)
+            axes.legend(
+                loc='lower center', bbox_to_anchor=(0.5, 1), ncol=2,
+                frameon=False, labelcolor='#e0e0e0', fontsize=8,
+                columnspacing=0.5, handletextpad=0.3, handlelength=1.0,
+                borderaxespad=0.15, borderpad=0.2,
+            )
         else:
             axes.set_xticks([])
             axes.set_yticks([])
@@ -480,7 +511,7 @@ class PageAMR(QWidget):
         # 스플리터 설정
         splitter.setCollapsible(0, False)  # 좌측 접기 불가
         splitter.setCollapsible(1, False)  # 우측 접기 불가
-        splitter.setSizes([700, 300])
+        splitter.setSizes([500, 500])
         main_layout.addWidget(splitter, 1)
         self.setLayout(main_layout)
         
@@ -549,7 +580,7 @@ class PageAMR(QWidget):
                 Unit=unit,
                 what=self.main_window.ANALYSIS_TARGET,)
             self.amr_worker.start()
-            self.visualization_area.follow_log(amr_logfile)
+            self.visualization_area.follow_log(amr_logfile, yname)
             self.log_timer.start(1000)
             self.log_display.appendPlainText(f"AMR 프로세스 시작 (PID: {self.amr_worker.pid})")
         except Exception as e:
@@ -636,7 +667,7 @@ class PageAMR(QWidget):
                         ip=self.main_window.IP_ADDRESS,xname=xname,yname=yname,Unit=unit, what=self.main_window.ANALYSIS_TARGET,restart=True, ppath=info_path
             )
             self.amr_worker.start()
-            self.visualization_area.follow_log(amr_logfile)
+            self.visualization_area.follow_log(amr_logfile, yname)
             self.log_timer.start(1000)
             self.log_display.appendPlainText(f"AMR 프로세스 시작 (PID: {self.amr_worker.pid})")
         except Exception as e:
