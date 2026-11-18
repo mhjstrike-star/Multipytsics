@@ -301,7 +301,7 @@ class PageAMR(QWidget):
         self.table.setHorizontalHeaderLabels(['설계변수', '하한 값', '상한 값', '단위'])
         
         # 테이블 스타일 설정
-        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.AnyKeyPressed)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setStyleSheet("""
             QTableWidget {
                 background-color: #2d2d2d;
@@ -347,7 +347,7 @@ class PageAMR(QWidget):
         self.output_table.setColumnCount(3)
         self.output_table.setHorizontalHeaderLabels(['출력변수', '목표 오차율', '생성여부'])
         # 출력 테이블 스타일 설정
-        self.output_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.AnyKeyPressed)
+        self.output_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.output_table.setStyleSheet("""
             QTableWidget {
                 background-color: #2d2d2d;
