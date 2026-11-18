@@ -27,7 +27,7 @@ import csv
 
 class solving:
     def __init__(self):
-        self.allruncount=[]    # 최종 모델 생성을 위한 항목
+        self.allruncount={}    # 최종 모델 생성을 위한 항목
     async def main (self, opath, rpm4fl, ip, DVname,x,Yname,f,Unit ,what,gen):
         '''AMR 실행 함수 (비동기)
         nx: 설계 변수 개수
@@ -88,10 +88,7 @@ class solving:
         
         # indices 순서대로 정렬하여 f 배열에 업데이트
         sorted_indices = sorted(all_results.keys())
-        self.allruncount.extend(
-            [*all_results[index][0], *all_results[index][1]]
-            for index in sorted_indices
-        )
+
         
         # Restart.csv를 sorted_indices 순서대로 append 방식으로 작성 (파일 없을 때만 새로 생성)
         csv_path2 = f'{base_folder_path}/task/AMR_Result/Restart.csv'

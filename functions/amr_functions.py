@@ -1,3 +1,5 @@
+from operator import index
+
 import numpy as np
 import os
 from os import sys
@@ -19,7 +21,7 @@ except ImportError:
     from solve import solving   # 이 파일을 직접 실행할 때
 
 from AMR import *
-
+from IMM import MMIntegrator
 class communicator(object):
     def __init__(self, nx, nf,opath, rpm4fl, ip, DVname,Yname,Unit, what):
         self.nx = nx
@@ -64,7 +66,8 @@ class communicator(object):
         
         # 초기 로그 메시지
         self.logger.info('Logger initialized successfully')
-
+        self.allrun= []
+    
     def Analysis(self, x, f):
 
         # '''PIAnO의 analysis tasks를 사용하여 x(1차원)에서의 함수값을 계산한 후
@@ -84,10 +87,13 @@ class communicator(object):
             asyncio.run(test.main(x=x, f=f, opath=self.opath, rpm4fl=float(self.rpm4fl),ip=self.ip, DVname=self.DVname, Yname=self.Yname, Unit=self.Unit,what=self.what,gen=self.generation))
             self.generation += 1   # 세대수 증가
             self.logger.info('Solving 완료')
-            
             self.f = f.flatten()
             self.logger.info('Analysis 완료')
             
+
+            self.allrun.extend([*xi, *fi] for xi, fi in zip(x, f))
+            
+                 
         except Exception as e:
             self.logger.error(f'Analysis 중 오류 발생: {e}', exc_info=True)
             print(f"Error during Analysis: {e}")
@@ -194,7 +200,7 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
     for ID in range(nx): xinfo["{:d}c".format(ID+1)] = [xl[ID], xu[ID]]
     # Define "xname" & "fname" 
     #xname=[ 'TEST.CON.x{:d}'.format(i+1) for i in range(nx) ]
-    fname = [ "TEST.g{:d}".format(i) if i > 0 else "TEST.y" for i in range(nf) ]      
+       
     ## 변수 타입 정의 ===========================================#              
     
     ## AMR 실행 ===========================================#              
@@ -203,7 +209,7 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
                  accuracy_limit=accuracy_limit, abs_avg_limit=abs_avg_limit, rel_avg_limit=rel_avg_limit, # 수렴조건 관련 파라미터1 
                  size_limit=size_limit, no_imp_count=no_imp_count, itrmop=itrmop,                         # 수렴조건 관련 파라미터2
                  process_outliers=process_outliers, ep=ep,  scaling_option = scaling_option,              # Outliers, Scaling 관련 파라미터
-                 xname=xname, fname=fname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
+                 xname=xname, fname=yname, is_xD3=is_xD3, is_parallel=is_parallel, cpath=cpath, iprint=iprint, # 출력     관련 파라미터
                  TestFile=TestFile, ntest=ntest, test2train=test2train                                    # (삭제예정)
                  )
     if amr.info!=0:
@@ -211,7 +217,10 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
         return               
     
     amr.run(comm=cm)
-   
+    # 최종 메타모델 생성
+    fdata= cm.allrun     
+    Gen_metamodel(fdata, nx, cpath, yname,bestmodel)
+
     if amr.info!=0:
         print(amr.info)
         return
@@ -239,6 +248,80 @@ def AMR_setting(dir):
         os.makedirs(dir, exist_ok=True)
     
 
+def Gen_metamodel(data,ndv,working_folder,oname,bestmodel):
+	run_result = []
+	## 문제 정의
+
+				
+
+	## 데이터 파일 로드1    
+	data = np.array(data)
+	for idx, col_idx in enumerate(range(ndv, data.shape[1])):
+		data = np.loadtxt(resultpath[idx], delimiter=',')
+		xset = np.array(data[:,:ndv])
+		fset = np.array(data[:,ndv:])    
+
+		## 설계 영역 정의 -> 반드시 1차원 list 형태로 입력
+		xl = np.amin(xset, axis=0).tolist()
+		xu = np.amax(xset, axis=0).tolist()
+		if  os.path.exists(os.path.join(working_folder, "result.txt")):
+			os.remove(os.path.join(working_folder, "result.txt"))
+
+		fset_col = np.array(data[:, col_idx])
+		mtype = "RBF"
+		## Metamodel Option 설정
+		# -------------------------------------------------------------------------------------------------
+		# iprm: 정수형 파라미터
+		# rprm: 실수형 파라미터
+		# prgterms: Polynomial Regression 회귀항 옵션 - 'FORWARD-SW' / 'BACKWARD-SW' /  수동으로 회귀항 선택*
+		#           * 수동으로 회귀항 선택 방법) 
+		#            -        LR: prgterms = ([1], [1]*ndv, [0]*ndv, [0]*ndv, [0]*int(ndv*(ndv-1)/2)) 
+		#            - Simple QD: prgterms = ([1], [1]*ndv, [1]*ndv, [0]*ndv, [0]*int(ndv*(ndv-1)/2)) 
+		#            -   Full QD: prgterms = ([1], [1]*ndv, [1]*ndv, [0]*ndv, [1]*int(ndv*(ndv-1)/2))
+		#            - Simple CB: prgterms = ([1], [1]*ndv, [1]*ndv, [1]*ndv, [1]*int(ndv*(ndv-1)/2))
+		# -------------------------------------------------------------------------------------------------
+		iprm, rprm, prgterms = [None]*20, [None]*20, None    
+		iprm[2] = 0 # Predicted R2 계산할지 말지 여부 - 0: 계산 X / 1: 계산 O    
+		iprm[3] = 1 # IMM.Log 출력 여부 - 0: 출력 X / 출력: O
+
+		if mtype == "KRG": # Kriging
+			iprm[5] = 1 # Global model type - 1: Constant / 2: Linear / 3: Simple Quadratic
+			iprm[6] = 1 # Correlation Function type - 1: Exponential / 2: Gaussian / 3: General Exponential                    
+		elif mtype == "RBF": # RBF
+			iprm[5] = 2 # Basis function type - 1: Gaussian / 2: Multiquadric
+			iprm[6] = 1 # Model type - 1: Interpolation / 2: Regression        
+		elif mtype == "PR": # PR
+			prgterms = 'FORWARD-SW' # 위 설명서 참고        
+		elif mtype == "EDT": # EDT
+			iprm[5] = 1 # Model type - 1: Hybrid / 2: Tree Bagging (TB) / 3: Random Forest (RF) / 4: Extra Trees (ET) / 5: Extreme Gradient Boosting (XGB)        
+		elif mtype == "MLP": # MLP
+			iprm[0] = 4 # Hyperparameter Optimizer 사용 여부 - 0: Default MLP ( [min(1.5*ndv, 200),0,...,0] ) / 4: PIAnO 탑재용 MLP 최적화 로직
+			# 사용자가 직접 MLP 네트워크 아키텍처를 입력하고 싶은 경우:
+			#    iprm[0] = 0으로 설정한 뒤, iprm[10] ~ iprm[19]까지 입력
+		## Metamodel 생성
+        # MLP 
+		mmi = MMIntegrator(mtype,iprm,rprm) # 인스턴스 생성
+		if mmi.info != 0: print("Initializing Failed:",mmi.info)    
+		mfolder= os.path.join(working_folder, oname[idx])
+		os.makedirs(mfolder, exist_ok=True)  # 폴더가 없으면 생성
+		print(fset_col.min())
+		print(fset_col.max())
+		mmi.build(xset,fset_col,xl,xu, prgterms=prgterms, binout = True, binpath = mfolder) # 모델 생성
+
+		if mmi.info != 0: print("Generating Metamodel Failed:",mmi.info)        
+		del mmi
+		mmi = MMIntegrator()
+		mmi.load( binpathname = os.path.join(mfolder,"IMM.MT5") )
+		
+
+		# 결과 기록 
+		print(f"결과: {oname[idx]} = {fapp[0]}")
+		with open(os.path.join(working_folder, "result.txt"), "a") as f:
+			f.write(f"{oname[idx]}:{fapp[0]}\n")
+		del mmi 
+		run_result.append(fapp[0])
+
+	result.append(run_result)
 if __name__ == '__main__':
     dir_ip          = 'D:\\python_dir\\_ANSYS_AUTOCAL\\ipdata_lss'
     supercom_input  = {'10.98.40.101':{'cnt':3,'loc':'pj'}, '10.14.84.229':{'cnt':1,'loc':'gj'}}
