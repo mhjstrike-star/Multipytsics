@@ -4,8 +4,7 @@ import numpy as np
 import os
 import glob
 from IMM import MMIntegrator
-import re
-import logging
+from pymoo.core.problem import ElementwiseProblem
 
 def obj(self,X):
     self.F=[]  # 초기화
@@ -88,7 +87,6 @@ class DO:
                 self.DisLvX.append(len(item.get('discrete_set').split(',')))
                 self.DisSetX.append(item.get('discrete_set').split(','))
         self.meta_path = meta_path
-
 
     def obj(self, X):
         F=[]  # 초기화
@@ -210,6 +208,126 @@ class DO:
 
         return moutput
 
+class MOGA(ElementwiseProblem): 
+    def __init__(self, DV_info, output_info,meta_path):
+        self.DV_info = DV_info
+        self.output_info = output_info
+        self.meta_path = meta_path
+        
+
+        connum=0 
+        dvnames = [item.get('name') for item in self.DV_info]
+        objnames = [item.get('name') for item in self.output_info if item.get('objective_type') in ['목적함수(최대화)', '목적함수(최소화)']]
+        connames = [item.get('name') for item in self.output_info if item.get('objective_type') == '구속조건']
+
+        for item in self.output_info:
+
+            if item.get('objective_type') == '구속조건':
+                if item.get('upper_bound') is not None:
+                    connum += 1
+                if item.get('lower_bound') is not None:
+                    connum += 1
+
+        self.xl = np.array([item.get('lv') for item in DV_info])
+        self.xu = np.array([item.get('uv') for item in DV_info])
+        super().__init__(n_var=len(dvnames),
+                         n_obj=len(objnames),
+                         n_ieq_constr=connum,
+                         xl=self.xl,
+                         xu=self.xu)
+
+    def _evaluate(self, x, out):
+        dvnames = [item.get('name') for item in self.DV_info]
+        objnames = [item.get('name') for item in self.output_info if item.get('objective_type') in ['목적함수(최대화)', '목적함수(최소화)']]
+        connames = [item.get('name') for item in self.output_info if item.get('objective_type') == '구속조건']
+        outnames = [item.get('name') for item in self.output_info]
+       
+        tempf=[]
+        tempg=[]
+        result = self.mdet_run(self.meta_path, np.array(x),outnames)
+        for idx, (key, data) in enumerate(result.items()): # data : metamodel output
+            item = self.output_info[idx]   # item : output_info-9999
+            if item.get('objective_type') == '목적함수(최대화)':
+                tempf.append(float(-1*data['value'][0]))
+            elif item.get('objective_type') == '목적함수(최소화)':
+                tempf.append(float(data['value'][0]))
+            elif item.get('objective_type') == '구속조건':
+                if item.get('upper_bound') is not None:
+                    tempg  .append(float(data['value'][0]-item.get('upper_bound')))  
+                if item.get('lower_bound') is not None:
+                    tempg.append(float(item.get('lower_bound')-data['value'][0]))
+        out["F"] = np.array(tempf)
+        out["G"] = np.array(tempg)
+    def mdet_run(self, address,x,outname):
+
+        path_cfile=os.path.join(address,"AMR.LOG")
+        best_model = []
+
+        # AMR.LOG에서 best model 파싱
+        if os.path.exists(path_cfile):
+            with open(path_cfile, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # 파일을 역순으로 탐색해서 가장 마지막 convergence_info 찾기
+            for i in range(len(lines) - 1, -1, -1):
+                    line = lines[i].strip()
+                    
+                    if 'convergence_info' in line:
+                        # convergence_info 라인에서 출력변수명들 추출
+                        parts = line.split()
+                        # convergence_info 이후의 값들이 출력변수명
+                        conv_info_idx = None
+                        for idx, part in enumerate(parts):
+                            if 'convergence_info' in part:
+                                conv_info_idx = idx
+                                break
+                        
+                        if conv_info_idx is not None:
+                            output_names = parts[conv_info_idx + 1:]
+                        else:
+                            output_names = []
+                        
+                        # 이 섹션에서 best model 라인 찾기
+                        best_model_values = []
+                        for j in range(i, min(i + 20, len(lines))):
+                            section_line = lines[j].strip()
+                            if section_line.startswith('best model'):
+                                model_parts = section_line.split()
+                                # 'best model' 이후의 값들이 각 출력변수의 best model
+                                best_model_values = model_parts[2:]
+                                break
+                        
+                        # 출력변수명과 best model 매핑
+                        best_model_dict = {}
+                        for idx, output_name in enumerate(outname):
+                            if idx < len(best_model_values):
+                                best_model_dict[output_name] = best_model_values[idx]
+                        
+                        # objname 순서대로 best_model 리스트 구성
+                        for output in outname:
+                            if output in best_model_dict:
+                                best_model.append(best_model_dict[output])
+                            else:
+                                best_model.append(None)
+                        
+                        break                
+        moutput={}
+        for idx, output in enumerate(outname):
+            dir = os.path.join(address, "_metamodels", f'F{idx+1}_{best_model_dict[output]}')
+            
+            for dirpath, dirnames, filenames in os.walk(dir):
+                for filename in filenames:
+                    if filename.lower().endswith('.mt5'):
+                        full_path = os.path.join(dirpath, filename)
+            mmi = MMIntegrator()
+            mmi.load(binpathname=full_path)
+            fapp = mmi.predict(x)
+            moutput[idx] = {'name': outname[idx],'value':fapp}
+            mmi=None  # mmi 초기화     
+        return moutput
+
+
+
 def meta_ParseV(metamodel_path):
     """
     메타모델 폴더에서 .IN 및 .OUT 파일을 찾아 변수명을 추출하는 함수
@@ -273,9 +391,6 @@ def meta_ParseV(metamodel_path):
         
     return dv_list, out_list    
     
-
-
-
 def AMR_ParseV(metamodel_path):
     """
     메타모델 폴더에서 .IN 및 .OUT 파일을 찾아 변수명을 추출하는 함수

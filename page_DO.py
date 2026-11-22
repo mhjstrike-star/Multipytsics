@@ -7,6 +7,15 @@ import functions.do_functions as do
 import multiprocessing as mp 
 import numpy as np 
 from aGO.core.base import *
+from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.operators.sampling.rnd import FloatRandomSampling
+from pymoo.operators.crossover.sbx import SBX
+from pymoo.operators.mutation.pm import PM
+from pymoo.termination import get_termination
+from pymoo.optimize import minimize
+import matplotlib.pyplot as plt
+
+
 class DOworker(mp.Process):
     def __init__(self, DV_info,output_info,meta_path):
         super().__init__()
@@ -16,74 +25,100 @@ class DOworker(mp.Process):
 
     def run(self):
         """워커 스레드에서 실행될 코드"""
- 
-        temp = do.DO(DV_info=self.DV_info, output_info=self.output_info,meta_path=self.meta_path)
-        logfile=os.path.join(self.meta_path,'aGO.log')
-           
-        if os.path.exists(logfile):
+        nobj = 0 
+        for item in self.output_info:
+            if item.get('objective_type') in ['목적함수(최대화)', '목적함수(최소화)']:
+                nobj += 1
+
+        if nobj ==1:
+            temp = do.DO(DV_info=self.DV_info, output_info=self.output_info,meta_path=self.meta_path)
+            logfile=os.path.join(self.meta_path,'aGO.log')
+            
+            if os.path.exists(logfile):
+                try:
+                    os.remove(logfile)
+                except OSError as e:
+                    pass
+            # logfile이 존재하면 삭제
+            if os.path.exists(logfile):
+                try:
+                    os.remove(logfile)
+                except OSError as e:
+                    pass
             try:
-                os.remove(logfile)
-            except OSError as e:
-                pass
-        
-
-        # logfile이 존재하면 삭제
-        if os.path.exists(logfile):
-            try:
-                os.remove(logfile)
-            except OSError as e:
-                pass
-        try:
-            # Task 생성 및 저장 
-            aGO_Opt = aGO(ndv=temp.ndv, 
-                          ncon=temp.ncon ,
-                          xl=temp.LB, 
-                          xu=temp.UB, 
-                          obj=temp.obj,
-                          con=temp.con, 
-                          DisLvX=temp.DisLvX, 
-                          DisSetX=temp.DisSetX,
-                          iStopEval =3000,
-                          nPop_DE   = 30,
-                          nPop_CS   = 15,
-                          iTRMOP    = 10000,
-                          cpath=self.meta_path)
-            
-            if temp.ncon==0:
-                Xopt, OBJopt = aGO_Opt.run()
-                CONopt = None
-            else:
-                Xopt, OBJopt, CONopt =aGO_Opt.run()
-            print("Xopt:", Xopt)
-            print("OBJopt:", OBJopt)
-            print("CONopt:", CONopt)
-            # Task 실행 완료 대기
-            #self.log_display.appendPlainText("Task finished")
-            
-
-            initialx = np.array([(ub + lb) * 0.5 for ub, lb in zip(temp.UB, temp.LB)])
-            initialf= temp.obj(initialx)
-            initialg = temp.G 
-
-            with open(logfile, 'a', encoding='utf-8') as f:
-                f.write("[Design Variables]\n")
-                for dv_item in self.DV_info:
-                    f.write(f"{dv_item}\n")
-                f.write("\n[Output Variables]\n")
-                for output_item in self.output_info:
-                    f.write(f"{output_item}\n")
-                f.write("\n[Initial Values]\n")
-                f.write(f"initialf: {initialf}\n")
-                f.write(f"initialg: {initialg}\n")  
-                f.write("\n[Optimum Values]\n")
-                f.write(f"temp.obj: {temp.optobj}\n")
-                f.write(f"temp.con: {temp.optcon}\n")
-            
-
+                # Task 생성 및 저장 
+                aGO_Opt = aGO(ndv=temp.ndv, 
+                            ncon=temp.ncon ,
+                            xl=temp.LB, 
+                            xu=temp.UB, 
+                            obj=temp.obj,
+                            con=temp.con, 
+                            DisLvX=temp.DisLvX, 
+                            DisSetX=temp.DisSetX,
+                            iStopEval =3000,
+                            nPop_DE   = 30,
+                            nPop_CS   = 15,
+                            iTRMOP    = 10000,
+                            cpath=self.meta_path)
+                if temp.ncon==0:
+                    Xopt, OBJopt = aGO_Opt.run()
+                    CONopt = None
+                else:
+                    Xopt, OBJopt, CONopt =aGO_Opt.run()
+                print("Xopt:", Xopt)
+                print("OBJopt:", OBJopt)
+                print("CONopt:", CONopt)
+                # Task 실행 완료 대기
+                #self.log_display.appendPlainText("Task finished")
                 
-        except Exception as e:
-            #self.log_display.appendPlainText(f"Error: {str(e)}")
-            print(f"Error: {str(e)}")
+
+                initialx = np.array([(ub + lb) * 0.5 for ub, lb in zip(temp.UB, temp.LB)])
+                initialf= temp.obj(initialx)
+                initialg = temp.G 
+
+                with open(logfile, 'a', encoding='utf-8') as f:
+                    f.write("[Design Variables]\n")
+                    for dv_item in self.DV_info:
+                        f.write(f"{dv_item}\n")
+                    f.write("\n[Output Variables]\n")
+                    for output_item in self.output_info:
+                        f.write(f"{output_item}\n")
+                    f.write("\n[Initial Values]\n")
+                    f.write(f"initialf: {initialf}\n")
+                    f.write(f"initialg: {initialg}\n")  
+                    f.write("\n[Optimum Values]\n")
+                    f.write(f"temp.obj: {temp.optobj}\n")
+                    f.write(f"temp.con: {temp.optcon}\n")
+            except Exception as e:
+                #self.log_display.appendPlainText(f"Error: {str(e)}")
+                print(f"Error: {str(e)}")
+
+        else:    
+            temp=do.MOGA(DV_info=self.DV_info, output_info=self.output_info, meta_path=self.meta_path)
+            algorithm = NSGA2(
+                pop_size=40,
+                n_offsprings=10,
+                sampling=FloatRandomSampling(),
+                crossover=SBX(prob=0.9, eta=15),
+                mutation=PM(eta=20),
+                eliminate_duplicates=True
+            )          
+            termination = get_termination("n_gen", 100)
+
+            res = minimize(
+                problem=temp,
+                algorithm=algorithm,
+                termination=termination,
+                seed=1,
+                save_history=True,
+                verbose=True
+            )
+            X = res.X
+            F = res.F
+            plt.scatter(F[:, 0], F[:, 1], s=30, facecolors='none', edgecolors='blue')
+            plt.title("Objective Space")
+            plt.show()
+            pass
 
     def stop(self):
         """프로세스 종료"""

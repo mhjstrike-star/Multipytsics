@@ -3,22 +3,23 @@ import os
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QComboBox, QAbstractItemView, QMenu, QPushButton, QHBoxLayout, QLineEdit, QFileDialog, QSpinBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from functions.main_functions import load_IV_list, load_OV_list, Analysis_setting, create_save, create_load
+from functions.main_functions import load_IV_list, load_OV_list, Analysis_setting, create_save, create_load, Set_XY
 
 
 class PageMain(QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window  # Main 창 참조
+
         self.init_ui()
     
     def init_ui(self):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
-        
+        file_path = os.path.join(os.path.dirname(__file__), 'ANALYSIS_DATA')
         # IV_list 로드 (Main 창에 저장)
-        self.main_window.IV_list = load_IV_list()
+        self.main_window.IV_list, self.main_window.IP = load_IV_list(file_path)
         
         # OV_list 로드 (Main 창에 저장)
         self.main_window.OV_list = load_OV_list()
@@ -52,6 +53,35 @@ class PageMain(QWidget):
         project_button_layout.addStretch()
         
         main_layout.addLayout(project_button_layout)
+        
+        # 입력 폴더 선택 레이아웃
+        result_layout = QHBoxLayout()
+        result_layout.setSpacing(10)
+        
+        result_label = QLabel('입력 폴더:')
+        result_label.setFixedWidth(100)
+        result_layout.addWidget(result_label)
+        
+        self.result_folder_input = QLineEdit()
+        self.result_folder_input.setPlaceholderText('폴더 경로를 입력하거나 버튼으로 선택...')
+        self.result_folder_input.setMinimumHeight(30)
+        self.result_folder_input.setMaximumWidth(400)
+        result_layout.addWidget(self.result_folder_input)
+        
+        btn_browse = QPushButton('폴더 탐색')
+        btn_browse.setMinimumHeight(30)
+        btn_browse.setMaximumWidth(100)
+        btn_browse.clicked.connect(self.on_browse_folder)
+        result_layout.addWidget(btn_browse)
+        result_layout.addStretch()
+        
+        main_layout.addLayout(result_layout)
+        
+        self.btn_apply_variables = QPushButton('입출력 변수 적용')
+        self.btn_apply_variables.setMinimumHeight(30)
+        self.btn_apply_variables.setMaximumWidth(150)
+        self.btn_apply_variables.clicked.connect(self.on_apply)
+        main_layout.addWidget(self.btn_apply_variables, alignment=Qt.AlignLeft)
         
         # 설계 변수 설정 텍스트
         design_var_label = QLabel('설계 변수 설정')
@@ -187,45 +217,12 @@ class PageMain(QWidget):
         # 출력 변수 테이블을 하단 50%에 배치
         main_layout.addWidget(self.output_table, 1)
         
-        # 해석 결과 폴더 선택 레이아웃
-        result_layout = QHBoxLayout()
-        result_layout.setSpacing(10)
-        
-        result_label = QLabel('해석 결과 폴더:')
-        result_label.setFixedWidth(100)
-        result_layout.addWidget(result_label)
-        
-        self.result_folder_input = QLineEdit()
-        self.result_folder_input.setPlaceholderText('폴더 경로를 입력하거나 버튼으로 선택...')
-        self.result_folder_input.setMinimumHeight(30)
-        result_layout.addWidget(self.result_folder_input)
-        
-        btn_browse = QPushButton('폴더 탐색')
-        btn_browse.setMinimumHeight(30)
-        btn_browse.setMaximumWidth(100)
-        btn_browse.clicked.connect(self.on_browse_folder)
-        result_layout.addWidget(btn_browse)
-        
-        main_layout.addLayout(result_layout)
-        
-        # 의왕 서버 레이아웃
+        # 서버 노드 설정 레이아웃
         uiwang_layout = QHBoxLayout()
         uiwang_layout.setSpacing(10)
         
-        # 의왕 서버 IP
-        uiwang_ip_label = QLabel('파주 서버 IP:')
-        uiwang_ip_label.setFixedWidth(100)
-        uiwang_layout.addWidget(uiwang_ip_label)
-        
-        self.uiwang_ip_input = QLineEdit()
-        self.uiwang_ip_input.setPlaceholderText('파주 서버 IP 입력...')
-        self.uiwang_ip_input.setMinimumHeight(30)
-        self.uiwang_ip_input.setMaximumWidth(150)
-        uiwang_layout.addWidget(self.uiwang_ip_input)
-        
-        # 의왕 노드개수
-        uiwang_node_label = QLabel('노드개수:')
-        uiwang_node_label.setFixedWidth(80)
+        uiwang_node_label = QLabel('파주 노드개수:')
+        uiwang_node_label.setFixedWidth(100)
         uiwang_layout.addWidget(uiwang_node_label)
         
         self.uiwang_node_input = QSpinBox()
@@ -236,29 +233,9 @@ class PageMain(QWidget):
         self.uiwang_node_input.setMaximumWidth(100)
         uiwang_layout.addWidget(self.uiwang_node_input)
         
-        uiwang_layout.addStretch()
-        
-        main_layout.addLayout(uiwang_layout)
-        
-        # 광주 서버 레이아웃
-        gwangju_layout = QHBoxLayout()
-        gwangju_layout.setSpacing(10)
-        
-        # 광주 서버 IP
-        gwangju_ip_label = QLabel('광주 서버 IP:')
-        gwangju_ip_label.setFixedWidth(100)
-        gwangju_layout.addWidget(gwangju_ip_label)
-        
-        self.gwangju_ip_input = QLineEdit()
-        self.gwangju_ip_input.setPlaceholderText('광주 서버 IP 입력...')
-        self.gwangju_ip_input.setMinimumHeight(30)
-        self.gwangju_ip_input.setMaximumWidth(150)
-        gwangju_layout.addWidget(self.gwangju_ip_input)
-        
-        # 광주 노드개수
-        gwangju_node_label = QLabel('노드개수:')
-        gwangju_node_label.setFixedWidth(80)
-        gwangju_layout.addWidget(gwangju_node_label)
+        gwangju_node_label = QLabel('광주 노드개수:')
+        gwangju_node_label.setFixedWidth(100)
+        uiwang_layout.addWidget(gwangju_node_label)
         
         self.gwangju_node_input = QSpinBox()
         self.gwangju_node_input.setMinimum(0)
@@ -266,11 +243,11 @@ class PageMain(QWidget):
         self.gwangju_node_input.setValue(1)
         self.gwangju_node_input.setMinimumHeight(30)
         self.gwangju_node_input.setMaximumWidth(100)
-        gwangju_layout.addWidget(self.gwangju_node_input)
+        uiwang_layout.addWidget(self.gwangju_node_input)
         
-        gwangju_layout.addStretch()
+        uiwang_layout.addStretch()
         
-        main_layout.addLayout(gwangju_layout)
+        main_layout.addLayout(uiwang_layout)
         
         # rpm4fl 및 해석 대상 입력 레이아웃
         analysis_layout = QHBoxLayout()
@@ -518,6 +495,23 @@ class PageMain(QWidget):
             if isinstance(combo_box, QComboBox):
                 combo_box.setCurrentText(status)
     
+    def _selected_server_ips(self):
+        supercom = []
+        for location, count in (
+            ('pj', self.uiwang_node_input.value()),
+            ('gj', self.gwangju_node_input.value()),
+        ):
+            if count:
+                address = self.main_window.IP.get(location)
+                if not address:
+                    print(f"{location} 서버 IP를 찾을 수 없습니다. 입력 폴더의 supercom.txt를 확인해주세요.")
+                    return None
+                supercom.extend([address] * count)
+        if not supercom:
+            print("최소 1개의 노드를 선택해주세요.")
+            return None
+        return supercom
+
     def on_confirm_design_variables(self):
         """설계변수 확정 버튼 클릭 시 호출"""
         # 선택된 설계 변수 정보 추출
@@ -551,26 +545,20 @@ class PageMain(QWidget):
                 except (ValueError, AttributeError):
                     pass
         # 슈퍼컴 서버 정보 기록 
-        supercom = []
-        supercom.extend([self.uiwang_ip_input.text()] * self.uiwang_node_input.value())
-        supercom.extend([self.gwangju_ip_input.text()] * self.gwangju_node_input.value())
-
-        if supercom==[]:
-            print("최소 1개의 IP가 입력되어야 합니다.")
+        if not self.result_folder_input.text():
+            print("입력 폴더를 선택해주세요.")
             return
-        else: 
-            self.main_window.IP_ADDRESS=supercom
-            self.main_window.WDIR= Analysis_setting(self.result_folder_input.text())
+        supercom = self._selected_server_ips()
+        if supercom is None:
+            return
+        self.main_window.IP_ADDRESS=supercom
+        self.main_window.WDIR= Analysis_setting(self.result_folder_input.text())
 
 
 
         self.main_window.ANALYSIS_TARGET = self.analysis_target_combo.currentText()  # 선택된 해석 대상 가져오기
         self.main_window.rpm4fl = self.rpm4fl_input.text()
 
-        if not self.result_folder_input.text() or not self.uiwang_ip_input.text():
-            print("해석 결과 폴더와 의왕 서버 IP를 입력해주세요")
-            return
-    
         # AMR 페이지의 테이블 업데이트
         if 'AMR' in self.main_window.pages:
             self.main_window.pages['AMR'].refresh_table()
@@ -607,16 +595,14 @@ class PageMain(QWidget):
                 except (ValueError, AttributeError):
                     pass
         # 슈퍼컴 서버 정보 기록 
-        supercom = []
-        supercom.extend([self.uiwang_ip_input.text()] * self.uiwang_node_input.value())
-        supercom.extend([self.gwangju_ip_input.text()] * self.gwangju_node_input.value())
-
-        if supercom==[]:
-            print("최소 1개의 IP가 입력되어야 합니다.")
+        if not self.result_folder_input.text():
+            print("입력 폴더를 선택해주세요.")
             return
-        else: 
-            self.main_window.IP_ADDRESS=supercom
-            self.main_window.WDIR=os.path.join(os.path.dirname(self.result_folder_input.text()), 'task')
+        supercom = self._selected_server_ips()
+        if supercom is None:
+            return
+        self.main_window.IP_ADDRESS=supercom
+        self.main_window.WDIR=os.path.join(os.path.dirname(self.result_folder_input.text()), 'task')
             
 
 
@@ -624,13 +610,30 @@ class PageMain(QWidget):
         self.main_window.ANALYSIS_TARGET = self.analysis_target_combo.currentText()  # 선택된 해석 대상 가져오기
         self.main_window.rpm4fl = self.rpm4fl_input.text()
 
-        if not self.result_folder_input.text() or not self.uiwang_ip_input.text():
-            print("해석 결과 폴더와 의왕 서버 IP를 입력해주세요")
-            return
-    
         # AMR 페이지의 테이블 업데이트
         if 'AMR' in self.main_window.pages:
             self.main_window.pages['AMR'].refresh_table()
+
+    def on_apply(self):
+        
+        
+        
+        if not self.result_folder_input.text():
+            print("입력폴더 경로를 선택해주세요")
+            return
+        file_path= self.result_folder_input.text()
+        try: 
+            Set_XY(file_path) # 폴더내에 all_ava_X 생성
+            
+
+        except Exception as e:
+            print(f"입력 변수 처리 중 오류 발생: {e}")
+            return
+        self.main_window.IV_list, self.main_window.IP = load_IV_list(file_path)
+        self.add_table_rows_from_IV_list()
+        pass
+
+        
 
     def on_browse_folder(self):
         """폴더 탐색 버튼 클릭 시 호출"""
@@ -650,4 +653,3 @@ class PageMain(QWidget):
     def on_load(self):
         """프로젝트 불러오기"""
         create_load(self.main_window)
-

@@ -6,21 +6,28 @@ import os
 import shutil
 import json
 from PySide6.QtWidgets import QFileDialog, QComboBox, QLineEdit, QTableWidgetItem
+try:
+    from . import run_analysis
+except ImportError:
+    try:
+        import run_analysis
+    except ImportError:
+        run_analysis = None
 
-
-def load_IV_list():
+def load_IV_list(file_path):
     """
     all_ava_X.txt 파일을 읽어서 NAME, UNIT, Value를 포함한 딕셔너리 리스트 반환
     
     Returns:
-        list: 각 항목이 {'NAME': str, 'UNIT': str, 'Value': float} 형식의 딕셔너리 리스트
+        tuple: 설계변수 딕셔너리 리스트와 pj/gj별 IP 주소 딕셔너리
     """
-    file_path = os.path.join(os.path.dirname(__file__), '..', 'ANALYSIS_DATA', 'all_ava_X.txt')
     
+    IVpath = os.path.join(file_path, 'all_ava_X.txt')
+    IPpath = os.path.join(file_path, 'supercom.txt')
     iv_list = []
     
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(IVpath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line:  # 빈 줄 무시
@@ -44,15 +51,34 @@ def load_IV_list():
                         'UNIT': unit,
                         'Value': value
                     })
-    
-    except FileNotFoundError:
-        print(f"파일을 찾을 수 없습니다: {file_path}")
-        return []
     except Exception as e:
-        print(f"파일 읽기 중 오류 발생: {e}")
-        return []
-    
-    return iv_list
+        print(f"변수 파일 읽기 중 오류 발생: {e}")
+        return [], {}
+    try:
+        ip_dict = {}
+        with open(IPpath, 'r', encoding='utf-8') as f:
+            for line in f:
+                parts = line.strip().split(None, 1)
+                if parts and parts[0] == 'ip':
+                    if len(parts) != 2:
+                        raise ValueError("ip 항목에 주소가 없습니다.")
+                    for entry in parts[1].split(','):
+                        address, separator, location = entry.strip().partition('@')
+                        location = location.strip().lower()
+                        if separator and location in ('pj', 'gj'):
+                            if not address.strip():
+                                raise ValueError("서버 IP 주소가 비어 있습니다.")
+                            if location in ip_dict:
+                                raise ValueError(f"서버 위치가 중복되었습니다: {location}")
+                            ip_dict[location] = address.strip()
+                    break
+            else:
+                raise ValueError("ip 항목을 찾을 수 없습니다.")
+    except (OSError, UnicodeError, ValueError) as e:
+        print(f"IP 파일 읽기 중 오류 발생: {e}")
+        return [], {}
+
+    return iv_list, ip_dict
 
 
 def load_OV_list():
@@ -136,7 +162,13 @@ def generate_table_data(row_count):
         }
         data.append(row)
     return data
-
+def Set_XY(path):
+    
+    try:
+        temp = run_analysis.AutoCal(path) 
+        temp.get_X()
+    except Exception as e:
+        print(f"Instance에서 입력변수 추출중 오류 발생: {e}")
 
 def validate_table_data(table_data):
     """
@@ -380,9 +412,11 @@ def _load_main_data(page_main, main_data):
     
     # 텍스트 필드 복원
     page_main.result_folder_input.setText(main_data.get('result_folder', ''))
-    page_main.uiwang_ip_input.setText(main_data.get('paju_ip', ''))
+    page_main.main_window.IP = {
+        'pj': main_data.get('paju_ip', ''),
+        'gj': main_data.get('gwangju_ip', '')
+    }
     page_main.uiwang_node_input.setValue(main_data.get('paju_nodes', 1))
-    page_main.gwangju_ip_input.setText(main_data.get('gwangju_ip', ''))
     page_main.gwangju_node_input.setValue(main_data.get('gwangju_nodes', 1))
     page_main.rpm4fl_input.setText(main_data.get('rpm4fl', '100'))
     page_main.analysis_target_combo.setCurrentText(main_data.get('analysis_target', 'All'))
@@ -550,14 +584,12 @@ def _extract_main_data(page_main):
     if hasattr(page_main, 'result_folder_input'):
         data['result_folder'] = page_main.result_folder_input.text()
     
-    if hasattr(page_main, 'uiwang_ip_input'):
-        data['paju_ip'] = page_main.uiwang_ip_input.text()
+    data['paju_ip'] = page_main.main_window.IP.get('pj', '')
     
     if hasattr(page_main, 'uiwang_node_input'):
         data['paju_nodes'] = page_main.uiwang_node_input.value()
     
-    if hasattr(page_main, 'gwangju_ip_input'):
-        data['gwangju_ip'] = page_main.gwangju_ip_input.text()
+    data['gwangju_ip'] = page_main.main_window.IP.get('gj', '')
     
     if hasattr(page_main, 'gwangju_node_input'):
         data['gwangju_nodes'] = page_main.gwangju_node_input.value()

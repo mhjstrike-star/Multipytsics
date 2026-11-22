@@ -2,12 +2,13 @@ import re
 import os
 import math
 import asyncio
+import csv
 import multiprocessing                  as mp   
 import functions.amr_functions          as amr  # AMR 관련 함수 모듈 임포트
 from pathlib                            import Path
 from PySide6.QtGui                      import QFont
 from PySide6.QtCore                     import Qt, QTimer, QThread, Signal, QSignalBlocker
-from PySide6.QtWidgets                  import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QDoubleSpinBox, QPushButton, QAbstractSpinBox, QPlainTextEdit, QSplitter, QLineEdit, QFileDialog, QScrollArea, QComboBox, QHeaderView, QSizePolicy
+from PySide6.QtWidgets                  import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QDoubleSpinBox, QSpinBox, QPushButton, QAbstractSpinBox, QPlainTextEdit, QSplitter, QLineEdit, QFileDialog, QScrollArea, QComboBox, QHeaderView, QSizePolicy, QMessageBox
 
 class AMRWorker(mp.Process):
     def __init__(self, nx, nobj, ncon, xl, xu, size_limit, accuracy_limit, cpath, opath, rpm4fl, ip, xname, yname, Unit, what,restart=False, ppath=None):
@@ -301,7 +302,7 @@ class PageAMR(QWidget):
         self.table.setHorizontalHeaderLabels(['설계변수', '하한 값', '상한 값', '단위'])
         
         # 테이블 스타일 설정
-        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.AnyKeyPressed)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setStyleSheet("""
             QTableWidget {
                 background-color: #2d2d2d;
@@ -347,7 +348,7 @@ class PageAMR(QWidget):
         self.output_table.setColumnCount(3)
         self.output_table.setHorizontalHeaderLabels(['출력변수', '목표 오차율', '생성여부'])
         # 출력 테이블 스타일 설정
-        self.output_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.AnyKeyPressed)
+        self.output_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.output_table.setStyleSheet("""
             QTableWidget {
                 background-color: #2d2d2d;
@@ -400,7 +401,7 @@ class PageAMR(QWidget):
         params_layout.addWidget(self.max_exp_spinbox)
         
         # 수렴 종료 조건
-        convergence_label = QLabel('수렴 종료:')
+        convergence_label = QLabel('메타모델 정확도 비개선 시 메타모델 최대 생성 회수:')
         self.convergence_spinbox = QDoubleSpinBox()
         self.convergence_spinbox.setMinimum(1)
         self.convergence_spinbox.setMaximum(1000)
@@ -429,6 +430,24 @@ class PageAMR(QWidget):
         button_layout.addWidget(btn_stop)
         button_layout.addStretch()
         left_layout.addLayout(button_layout)
+
+        additional_layout = QHBoxLayout()
+        additional_layout.setSpacing(10)
+        additional_layout.addWidget(QLabel('완료 이후 추가샘플링:'))
+        self.additional_sampling_spinbox = QSpinBox()
+        self.additional_sampling_spinbox.setRange(0, 2147483647)
+        self.additional_sampling_spinbox.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.additional_sampling_spinbox.setMinimumHeight(30)
+        self.additional_sampling_spinbox.setFixedWidth(64)
+        additional_layout.addWidget(self.additional_sampling_spinbox)
+        self.btn_additional_analysis = QPushButton('추가 해석 실행')
+        self.btn_additional_analysis.setMinimumHeight(30)
+        self.btn_additional_analysis.setMaximumWidth(150)
+        self.btn_additional_analysis.clicked.connect(self.on_execute3)
+        additional_layout.addWidget(self.btn_additional_analysis)
+        additional_layout.addStretch()
+        left_layout.addLayout(additional_layout)
+
         # 작업 이어하기 섹션
         continue_work_label = QLabel('작업 이어하기')
         continue_work_font = QFont()
@@ -601,31 +620,26 @@ class PageAMR(QWidget):
         else:
             self.log_display.appendPlainText(f"AMR 실행 실패 (PID: {worker.pid}, 종료 코드: {exitcode}).")
 
-    def on_browse_file(self): # 파일 탐색 버튼 클릭 시 호출
-        file_path, _ = QFileDialog.getOpenFileName(self, '분석 결과 파일 선택', self.main_window.WDIR, 'CSV Files (*.csv);;All Files (*)')
-        if file_path:
-            self.info_path.setText(file_path)
-
-    def on_execute2(self): # 작업 이어하기 실행 버튼 클릭 시 호출
+    def on_execute3(self):
         if self.main_window.Executing is not None or (hasattr(self, 'amr_worker') and self.amr_worker.is_alive()):
             self.log_display.appendPlainText("이미 실행 중입니다.")
             return
-        info_path = self.info_path.text().strip()
-        if not info_path:
-            self.log_display.appendPlainText("오류: 이어하기 CSV 파일을 선택해주세요.")
-            return
-        if not os.path.isfile(info_path):
-            self.log_display.appendPlainText(f"오류: 파일을 찾을 수 없습니다: {info_path}")
+        info_path = os.path.join(self.main_window.WDIR, 'AMR_Result','Restart.csv')   # 완료된 AMR 작업의 Restart 파일 
+        if not os.path.exists(info_path):
+            self.log_display.appendPlainText("완료된 AMR 작업의 Restart 파일이 없습니다.")
             return
 
         self.main_window.Executing = True
         try: # 이전 타이머 멈추기 (파일 handle이 해제되도록)
+            with open(info_path, 'r', encoding='utf-8-sig', newline='') as csv_file:
+                row_restart = sum(1 for row in csv.reader(csv_file, strict=True) if row)
             if self.log_timer.isActive():
                 self.log_timer.stop()
             log_file_path = os.path.join(self.main_window.WDIR, 'amrfunction.log')
             self.log_file_path = log_file_path
             self.log_position = 0  # 로그 위치 초기화
             self.log_display.clear()  # 로그 디스플레이 초기화
+            self.log_display.appendPlainText(f"이어하기 데이터 행 수: {row_restart}")
             max_exp = self.max_exp_spinbox.value()
             nx = len(self.main_window.DV)      # 선택된 설계 변수 개수
             nobj = 1
@@ -662,6 +676,101 @@ class PageAMR(QWidget):
                 except OSError as e:
                     pass
             amr_logfile.unlink(missing_ok=True)
+            size_limit= self.additional_sampling_spinbox.value()
+            if size_limit < 0:
+                QMessageBox.warning(
+                    self,
+                    '실험점 개수 확인',
+                    '지정된 Restart 파일 내 실험점이 최대 실험점 개수보다 많습니다.'
+                )
+                return
+
+            self.amr_worker = AMRWorker(nx=nx, nobj=nobj, ncon=ncon,xl= xl,xu= xu, size_limit=size_limit,
+                        accuracy_limit= accuracy_limit,cpath=cpath,opath=self.main_window.WDIR,rpm4fl=self.main_window.rpm4fl,
+                        ip=self.main_window.IP_ADDRESS,xname=xname,yname=yname,Unit=unit, what=self.main_window.ANALYSIS_TARGET,restart=True, ppath=info_path
+            )
+            self.amr_worker.start()
+            self.visualization_area.follow_log(amr_logfile, yname)
+            self.log_timer.start(1000)
+            self.log_display.appendPlainText(f"AMR 프로세스 시작 (PID: {self.amr_worker.pid})")
+        except Exception as e:
+            self.log_display.appendPlainText(f"AMR 실행 준비 중 오류 발생: {e}")
+        finally:
+            self.main_window.Executing = None
+
+    def on_browse_file(self): # 파일 탐색 버튼 클릭 시 호출
+        file_path, _ = QFileDialog.getOpenFileName(self, 'Restart 파일 선택', self.main_window.WDIR, 'CSV Files (*.csv);;All Files (*)')
+        if file_path:
+            self.info_path.setText(file_path)
+
+    def on_execute2(self): # 작업 이어하기 실행 버튼 클릭 시 호출
+        if self.main_window.Executing is not None or (hasattr(self, 'amr_worker') and self.amr_worker.is_alive()):
+            self.log_display.appendPlainText("이미 실행 중입니다.")
+            return
+        info_path = self.info_path.text().strip()
+        if not info_path:
+            self.log_display.appendPlainText("오류: 이어하기 CSV 파일을 선택해주세요.")
+            return
+        if not os.path.isfile(info_path):
+            self.log_display.appendPlainText(f"오류: 파일을 찾을 수 없습니다: {info_path}")
+            return
+
+        self.main_window.Executing = True
+        try: # 이전 타이머 멈추기 (파일 handle이 해제되도록)
+            with open(info_path, 'r', encoding='utf-8-sig', newline='') as csv_file:
+                row_restart = sum(1 for row in csv.reader(csv_file, strict=True) if row)
+            if self.log_timer.isActive():
+                self.log_timer.stop()
+            log_file_path = os.path.join(self.main_window.WDIR, 'amrfunction.log')
+            self.log_file_path = log_file_path
+            self.log_position = 0  # 로그 위치 초기화
+            self.log_display.clear()  # 로그 디스플레이 초기화
+            self.log_display.appendPlainText(f"이어하기 데이터 행 수: {row_restart}")
+            max_exp = self.max_exp_spinbox.value()
+            nx = len(self.main_window.DV)      # 선택된 설계 변수 개수
+            nobj = 1
+            ncon  = len(self.main_window.OV)-1
+            xl = [float(self.table.item(i, 1).text()) for i in range(self.table.rowCount())]  # n x 1 list (하한값)
+            xu = [float(self.table.item(i, 2).text()) for i in range(self.table.rowCount())]  # n x 1 list (상한값)
+            xname = [self.table.item(i, 0).text() for i in range(self.table.rowCount())]  # n x 1 list (설계변수 이름)
+            yname = [self.output_table.item(i, 0).text() for i in range(self.output_table.rowCount())]  # n x 1 list (출력변수 이름)
+            unit= [self.table.item(i, 3).text() for i in range(self.table.rowCount())]  # n x 1 list (설계변수 단위)
+            size_limit = int(max_exp)  # 최대 실험점 개수
+            accuracy_limit =  [ov.get('TARGET_ERROR', 0)*0.01 for ov in self.main_window.OV]
+            cpath=os.path.join(os.path.dirname(self.main_window.WDIR), 'task/AMR_Result')  # AMR 결과 저장 경로
+            count_file = os.path.join(self.main_window.WDIR, 'runcount.txt')
+            wdir_path = os.path.join(self.main_window.WDIR, 'wdir')
+            if os.path.exists(wdir_path):
+                folders = [d for d in os.listdir(wdir_path) if os.path.isdir(os.path.join(wdir_path, d)) and d.isdigit()]
+                if folders:
+                    max_folder_num = max(int(f) for f in folders)
+                else:
+                    max_folder_num = 0
+            else:
+                max_folder_num = 0
+
+            with open(count_file, 'w') as f:
+                f.write(str(max_folder_num))
+
+            print(f"저장된 분석 파일에서 작업을 이어합니다: {info_path}")
+            print(f"info_path = {info_path}")
+            convergence_file = os.path.join(cpath, 'convergence_info.bin')
+            amr_logfile = Path(cpath) / 'AMR.LOG'
+            if os.path.exists(convergence_file):
+                try:
+                    os.remove(convergence_file)
+                except OSError as e:
+                    pass
+            amr_logfile.unlink(missing_ok=True)
+            size_limit= size_limit-row_restart 
+            if size_limit < 0:
+                QMessageBox.warning(
+                    self,
+                    '실험점 개수 확인',
+                    '지정된 Restart 파일 내 실험점이 최대 실험점 개수보다 많습니다.'
+                )
+                return
+
             self.amr_worker = AMRWorker(nx=nx, nobj=nobj, ncon=ncon,xl= xl,xu= xu, size_limit=size_limit,
                         accuracy_limit= accuracy_limit,cpath=cpath,opath=self.main_window.WDIR,rpm4fl=self.main_window.rpm4fl,
                         ip=self.main_window.IP_ADDRESS,xname=xname,yname=yname,Unit=unit, what=self.main_window.ANALYSIS_TARGET,restart=True, ppath=info_path

@@ -9,13 +9,6 @@ except ImportError:
     except ImportError:
         run_analysis = None
 
-try:
-    from . import controller
-except ImportError:
-    try:
-        import controller
-    except ImportError:
-        controller = None
 
 import asyncio
 import logging

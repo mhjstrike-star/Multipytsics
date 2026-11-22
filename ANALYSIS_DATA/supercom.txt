@@ -1,0 +1,15 @@
+# delimiter	tab
+
+# ip/ID/PW	ip/ID/PW for supercom connection
+# dir		direction to use at supercom - gotta use '/' as delimiter because supercom is linux
+# nworks		max ncpus in supercom simultaneously - use among 16/32/48/-1(active)
+## -1(active) means check #user and use nworks as 16*(3-#user) - if #user>=2 then nworks gotta be 16
+## ncpus is 16@maxwell for FLCL_Pc, 1@maxwell_csv and 2@maxwell for Fr
+## tasks==ncpus, ver=2021r2, pj=777
+
+
+ip	10.98.40.101@pj,10.14.84.229@gj
+ID	6706832
+PW	rhrnak12!
+dir	pido_ver1
+nworks	-1
