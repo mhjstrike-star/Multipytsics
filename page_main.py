@@ -19,7 +19,7 @@ class PageMain(QWidget):
         main_layout.setSpacing(10)
         file_path = os.path.join(os.path.dirname(__file__), 'ANALYSIS_DATA')
         # IV_list 로드 (Main 창에 저장)
-        self.main_window.IV_list, self.main_window.IP = load_IV_list(file_path)
+        self.main_window.IV_list, self.main_window.IP = load_IV_list(file_path,file_path)
         
         # OV_list 로드 (Main 창에 저장)
         self.main_window.OV_list = load_OV_list()
@@ -77,7 +77,7 @@ class PageMain(QWidget):
         
         main_layout.addLayout(result_layout)
         
-        self.btn_apply_variables = QPushButton('입출력 변수 적용')
+        self.btn_apply_variables = QPushButton('입력 변수 적용')
         self.btn_apply_variables.setMinimumHeight(30)
         self.btn_apply_variables.setMaximumWidth(150)
         self.btn_apply_variables.clicked.connect(self.on_apply)
@@ -629,7 +629,8 @@ class PageMain(QWidget):
         except Exception as e:
             print(f"입력 변수 처리 중 오류 발생: {e}")
             return
-        self.main_window.IV_list, self.main_window.IP = load_IV_list(file_path)
+        file_path2 = os.path.join(os.path.dirname(__file__), 'ANALYSIS_DATA')
+        self.main_window.IV_list, self.main_window.IP = load_IV_list(file_path, file_path2)
         self.add_table_rows_from_IV_list()
         pass
 

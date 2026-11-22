@@ -14,7 +14,7 @@ except ImportError:
     except ImportError:
         run_analysis = None
 
-def load_IV_list(file_path):
+def load_IV_list(file_path, file_path2):
     """
     all_ava_X.txt 파일을 읽어서 NAME, UNIT, Value를 포함한 딕셔너리 리스트 반환
     
@@ -23,7 +23,7 @@ def load_IV_list(file_path):
     """
     
     IVpath = os.path.join(file_path, 'all_ava_X.txt')
-    IPpath = os.path.join(file_path, 'supercom.txt')
+    IPpath = os.path.join(file_path2, 'supercom.txt')
     iv_list = []
     
     try:
