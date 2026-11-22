@@ -1,12 +1,16 @@
-from operator import index
 
+from operator import index
 import numpy as np
+import re
 import os
-from os import sys
-import platform
+import shutil
 import asyncio
 import logging
-import shutil
+import platform
+import numpy            as np
+from os                 import sys
+from pathlib            import Path
+from tempfile           import TemporaryDirectory
 try: from . import run_analysis
 except ImportError:
     try: import run_analysis
@@ -89,6 +93,40 @@ class communicator(object):
     
     def HMC(self):
         print('test')
+
+def export_final_metamodels(result_dir: Path, output_count: int) -> Path:
+    log = (result_dir / 'AMR.LOG').read_text(encoding='utf-8-sig', errors='replace')
+    _, summary_header, summary = log.rpartition('Results of Final Metamodels')
+    selection = re.search(r'^[ \t]*BEST MODEL[ \t]+([^\r\n]+)', summary, re.MULTILINE)
+    if not summary_header or selection is None:
+        raise RuntimeError('AMR.LOG is missing its final metamodel selection')
+
+    model_types = selection.group(1).split()
+    if len(model_types) != output_count or any(re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', name) is None for name in model_types):
+        raise RuntimeError(f'Invalid final metamodel selection: {model_types}')
+    destination = result_dir / 'bestmodels'
+    with TemporaryDirectory(prefix='.bestmodels-', dir=result_dir) as temp_dir:
+        staging_dir = Path(temp_dir) / 'new'
+        previous_dir = Path(f'{temp_dir}-previous')
+        for index, model_type in enumerate(model_types, start=1):
+            model_dir = f'F{index}_{model_type}'
+            source = result_dir / '_metamodels' / model_dir / 'IMM.MT5'
+            if not source.is_file() or source.stat().st_size == 0:
+                raise RuntimeError(f'Final AMR metamodel file is missing or empty: {source}')
+            output = staging_dir / model_dir / source.name
+            output.parent.mkdir(parents=True)
+            shutil.copyfile(source, output)
+        if destination.exists():
+            destination.rename(previous_dir)
+        try:
+            staging_dir.rename(destination)
+        except OSError:
+            if previous_dir.exists():
+                previous_dir.rename(destination)
+            raise
+        if previous_dir.exists():
+            shutil.rmtree(previous_dir)
+    return destination
 
 def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xname,yname,Unit, what,restart=False,ppath=None):
     global icnt
@@ -193,8 +231,8 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
     amr.run(comm=cm)
 
     # 최종 메타모델 생성
-    fdata= cm.allrun     
-    Gen_metamodel(fdata, nx, cpath, yname,bestmodel)
+       
+    
 
     if amr.info!=0:
         print(amr.info)
@@ -203,6 +241,8 @@ def main(nx,nobj,ncon,xl,xu,size_limit,accuracy_limit,cpath,opath, rpm4fl, ip,xn
 
     if amr.info != 0:
         raise RuntimeError(f"AMR execution failed: {amr.info}")
+    model_dir = export_final_metamodels(Path(cpath), nf)
+    cm.logger.info('Final AMR metamodels saved to %s', model_dir)
 
 
 
@@ -221,80 +261,6 @@ def AMR_setting(dir):
     
 
 
-def Gen_metamodel(data,ndv,working_folder,oname,bestmodel):
-	run_result = []
-	## 문제 정의
-
-				
-
-	## 데이터 파일 로드1    
-	data = np.array(data)
-	for idx, col_idx in enumerate(range(ndv, data.shape[1])):
-		data = np.loadtxt(resultpath[idx], delimiter=',')
-		xset = np.array(data[:,:ndv])
-		fset = np.array(data[:,ndv:])    
-
-		## 설계 영역 정의 -> 반드시 1차원 list 형태로 입력
-		xl = np.amin(xset, axis=0).tolist()
-		xu = np.amax(xset, axis=0).tolist()
-		if  os.path.exists(os.path.join(working_folder, "result.txt")):
-			os.remove(os.path.join(working_folder, "result.txt"))
-
-		fset_col = np.array(data[:, col_idx])
-		mtype = "RBF"
-		## Metamodel Option 설정
-		# -------------------------------------------------------------------------------------------------
-		# iprm: 정수형 파라미터
-		# rprm: 실수형 파라미터
-		# prgterms: Polynomial Regression 회귀항 옵션 - 'FORWARD-SW' / 'BACKWARD-SW' /  수동으로 회귀항 선택*
-		#           * 수동으로 회귀항 선택 방법) 
-		#            -        LR: prgterms = ([1], [1]*ndv, [0]*ndv, [0]*ndv, [0]*int(ndv*(ndv-1)/2)) 
-		#            - Simple QD: prgterms = ([1], [1]*ndv, [1]*ndv, [0]*ndv, [0]*int(ndv*(ndv-1)/2)) 
-		#            -   Full QD: prgterms = ([1], [1]*ndv, [1]*ndv, [0]*ndv, [1]*int(ndv*(ndv-1)/2))
-		#            - Simple CB: prgterms = ([1], [1]*ndv, [1]*ndv, [1]*ndv, [1]*int(ndv*(ndv-1)/2))
-		# -------------------------------------------------------------------------------------------------
-		iprm, rprm, prgterms = [None]*20, [None]*20, None    
-		iprm[2] = 0 # Predicted R2 계산할지 말지 여부 - 0: 계산 X / 1: 계산 O    
-		iprm[3] = 1 # IMM.Log 출력 여부 - 0: 출력 X / 출력: O
-
-		if mtype == "KRG": # Kriging
-			iprm[5] = 1 # Global model type - 1: Constant / 2: Linear / 3: Simple Quadratic
-			iprm[6] = 1 # Correlation Function type - 1: Exponential / 2: Gaussian / 3: General Exponential                    
-		elif mtype == "RBF": # RBF
-			iprm[5] = 2 # Basis function type - 1: Gaussian / 2: Multiquadric
-			iprm[6] = 1 # Model type - 1: Interpolation / 2: Regression        
-		elif mtype == "PR": # PR
-			prgterms = 'FORWARD-SW' # 위 설명서 참고        
-		elif mtype == "EDT": # EDT
-			iprm[5] = 1 # Model type - 1: Hybrid / 2: Tree Bagging (TB) / 3: Random Forest (RF) / 4: Extra Trees (ET) / 5: Extreme Gradient Boosting (XGB)        
-		elif mtype == "MLP": # MLP
-			iprm[0] = 4 # Hyperparameter Optimizer 사용 여부 - 0: Default MLP ( [min(1.5*ndv, 200),0,...,0] ) / 4: PIAnO 탑재용 MLP 최적화 로직
-			# 사용자가 직접 MLP 네트워크 아키텍처를 입력하고 싶은 경우:
-			#    iprm[0] = 0으로 설정한 뒤, iprm[10] ~ iprm[19]까지 입력
-		## Metamodel 생성
-        # MLP 
-		mmi = MMIntegrator(mtype,iprm,rprm) # 인스턴스 생성
-		if mmi.info != 0: print("Initializing Failed:",mmi.info)    
-		mfolder= os.path.join(working_folder, oname[idx])
-		os.makedirs(mfolder, exist_ok=True)  # 폴더가 없으면 생성
-		print(fset_col.min())
-		print(fset_col.max())
-		mmi.build(xset,fset_col,xl,xu, prgterms=prgterms, binout = True, binpath = mfolder) # 모델 생성
-
-		if mmi.info != 0: print("Generating Metamodel Failed:",mmi.info)        
-		del mmi
-		mmi = MMIntegrator()
-		mmi.load( binpathname = os.path.join(mfolder,"IMM.MT5") )
-		
-
-		# 결과 기록 
-		print(f"결과: {oname[idx]} = {fapp[0]}")
-		with open(os.path.join(working_folder, "result.txt"), "a") as f:
-			f.write(f"{oname[idx]}:{fapp[0]}\n")
-		del mmi 
-		run_result.append(fapp[0])
-
-	result.append(run_result)
 
 
 if __name__ == '__main__':
