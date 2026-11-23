@@ -142,10 +142,10 @@ class PageMain(QWidget):
         """)
         
         # IV_list 데이터로 테이블 생성
-        if self.main_window.IV_list:
-            self.add_table_rows_from_IV_list()
-        else:
-            self.add_table_rows(5)
+        #if self.main_window.IV_list:
+        #    self.add_table_rows_from_IV_list()
+        #else:
+        #self.add_table_rows(5)
         
         # 입력 변수 테이블을 상단 50%에 배치
         main_layout.addWidget(self.table, 1)
@@ -632,6 +632,7 @@ class PageMain(QWidget):
         file_path2 = os.path.join(os.path.dirname(__file__), 'ANALYSIS_DATA')
         self.main_window.IV_list, self.main_window.IP = load_IV_list(file_path, file_path2)
         self.add_table_rows_from_IV_list()
+
         pass
 
         

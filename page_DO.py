@@ -1,6 +1,6 @@
 ﻿import os
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QPushButton, QPlainTextEdit, QSplitter, QComboBox, QLineEdit, QFileDialog
+from PySide6.QtWidgets import QWidget, QDialog, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView, QHBoxLayout, QPushButton, QPlainTextEdit, QSplitter, QComboBox, QLineEdit, QFileDialog
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 import functions.do_functions as do
@@ -13,15 +13,14 @@ from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.termination import get_termination
 from pymoo.optimize import minimize
-import matplotlib.pyplot as plt
-
 
 class DOworker(mp.Process):
-    def __init__(self, DV_info,output_info,meta_path):
+    def __init__(self, DV_info,output_info,meta_path, result_connection):
         super().__init__()
         self.DV_info = DV_info
         self.output_info = output_info
         self.meta_path = meta_path
+        self.result_connection = result_connection
 
     def run(self):
         """워커 스레드에서 실행될 코드"""
@@ -113,22 +112,78 @@ class DOworker(mp.Process):
                 save_history=True,
                 verbose=True
             )
-            X = res.X
             F = res.F
-            plt.scatter(F[:, 0], F[:, 1], s=30, facecolors='none', edgecolors='blue')
-            plt.title("Objective Space")
-            plt.show()
-            pass
+            if F is None or np.ndim(F) != 2 or F.shape[0] == 0 or F.shape[1] < 2:
+                raise ValueError("표시할 다목적 최적화 결과가 없습니다.")
+            self.result_connection.send(F[:, :2].tolist())
+            self.result_connection.close()
 
-    def stop(self):
+    def stop(self): 
         """프로세스 종료"""
         if self.is_alive():
             self.terminate()
+
+class ObjectiveScatterDialog(QDialog):
+    def __init__(self, points, objectives, parent=None):
+        super().__init__(parent)
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+
+        self.setWindowTitle("Objective Space")
+        self.resize(800, 600)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        figure = Figure(layout='constrained')
+        self.canvas = FigureCanvasQTAgg(figure)
+        self.axes = figure.add_subplot()
+        self.points = np.asarray(points, dtype=float)
+        self.scatter = self.axes.scatter(
+            self.points[:, 0], self.points[:, 1],
+            s=30, facecolors='none', edgecolors='blue',
+        )
+        self.axes.set_title("Objective Space")
+        labels = []
+        for objective in objectives[:2]:
+            label = objective['name']
+            if objective['objective_type'] == '목적함수(최대화)':
+                label += ' (최적화 값: -원래 값)'
+            labels.append(label)
+        self.axes.set_xlabel(labels[0])
+        self.axes.set_ylabel(labels[1])
+        self.annotation = self.axes.annotate(
+            '', xy=(0, 0), xytext=(10, 10), textcoords='offset points',
+            bbox=dict(boxstyle='round', fc='white', alpha=0.9),
+        )
+        self.annotation.set_visible(False)
+        self.canvas.mpl_connect('motion_notify_event', self.on_hover)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.canvas)
+
+    def on_hover(self, event):
+        if event.inaxes == self.axes:
+            contains, details = self.scatter.contains(event)
+            if contains:
+                indices = details['ind']
+                screen_points = self.axes.transData.transform(self.points[indices])
+                nearest = np.argmin(np.sum((screen_points - [event.x, event.y]) ** 2, axis=1))
+                x, y = self.points[indices[nearest]]
+                self.annotation.xy = (x, y)
+                self.annotation.set_text(f'({x:.6g}, {y:.6g})')
+                self.annotation.set_visible(True)
+                self.canvas.draw_idle()
+                return
+        if self.annotation.get_visible():
+            self.annotation.set_visible(False)
+            self.canvas.draw_idle()
+
 
 class PageDO(QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window  # Main 창 참조
+        self.result_connection = None
+        self.scatter_dialogs = []
+        self.worker_timer = QTimer(self)
+        self.worker_timer.timeout.connect(self.check_worker)
         self.init_ui()
     
     def init_ui(self):
@@ -366,6 +421,9 @@ class PageDO(QWidget):
    
     def on_execute(self):
         """실행 버튼 클릭 시 호출"""
+        if self.worker_timer.isActive():
+            self.monitor_display.appendPlainText("이미 최적화가 실행 중입니다.")
+            return
         # 설계 변수 테이블에서 정보 수집
         DV_info = []
         for i in range(self.table.rowCount()):
@@ -408,7 +466,13 @@ class PageDO(QWidget):
 
         metapath=self.metamodel_path_input.text()
 
-        self.temp =DOworker(DV_info=DV_info, output_info=output_info,meta_path=metapath)
+        objectives = [item for item in output_info if item['objective_type'] in ('목적함수(최대화)', '목적함수(최소화)')]
+        if not objectives:
+            self.monitor_display.appendPlainText("최소 1개의 목적함수를 선택해주세요.")
+            return
+        self.objectives = objectives
+        receiver, sender = mp.Pipe(duplex=False)
+        self.temp =DOworker(DV_info=DV_info, output_info=output_info,meta_path=metapath, result_connection=sender)
         #temp = do.DO(DV_info=DV_info, output_info=output_info,meta_path=metapath)
         import numpy as np
 
@@ -417,13 +481,46 @@ class PageDO(QWidget):
 
         try:
             self.temp.start()
+            sender.close()
+            self.result_connection = receiver
+            self.worker_timer.start(200)
         except Exception as e:
+            sender.close()
+            receiver.close()
+            self.monitor_display.appendPlainText(f"DO 구성 실패: {e}")
             print(f"DO 구성 실패 : {e}")
        # aGO_Opt = aGO(ndv=temp.ndv, ncon=temp.ncon ,xl=temp.LB, xu=temp.UB, obj=temp.obj,con=temp.con, DisLvX=temp.DisLvX, DisSetX=temp.DisSetX,iStopEval =3000,nPop_DE   = 30,nPop_CS   = 15,iTRMOP    = 10000,cpath=metapath)
 
         
 
     
+    def check_worker(self):
+        exitcode = self.temp.exitcode
+        if self.result_connection is not None and self.result_connection.poll():
+            try:
+                points = self.result_connection.recv()
+            except EOFError:
+                points = None
+            finally:
+                self.result_connection.close()
+                self.result_connection = None
+            if points is not None:
+                dialog = ObjectiveScatterDialog(points, self.objectives, self)
+                self.scatter_dialogs.append(dialog)
+                dialog.finished.connect(lambda _, window=dialog: self.scatter_dialogs.remove(window))
+                dialog.show()
+
+        if exitcode is not None:
+            self.temp.join()
+            self.worker_timer.stop()
+            if self.result_connection is not None:
+                self.result_connection.close()
+                self.result_connection = None
+            if exitcode != 0:
+                self.monitor_display.appendPlainText(
+                    f"최적화 실행 실패 (종료 코드: {exitcode})."
+                )
+
     def browse_metamodel_folder(self):
         """폴더 탐색 버튼 클릭 시 호출"""
         folder_path = QFileDialog.getExistingDirectory(self, '메타모델 폴더 선택')
